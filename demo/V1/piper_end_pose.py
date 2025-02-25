@@ -49,14 +49,14 @@ if __name__ == "__main__":
     enable_fun(piper=piper)
     piper.GripperCtrl(0,1000,0x01, 0)
     factor = 1000
-    position = [
-                55.0, \
-                0.0, \
-                206.0, \
-                0, \
-                85.0, \
-                0, \
-                0]
+    #position = [
+    #            55.0, \
+    #            0.0, \
+    #            206.0, \
+    #            0, \
+    #            85.0, \
+    #            0, \
+    #            0]
     # position = [0.0, \
     #             0.0, \
     #             80.0, \
@@ -64,6 +64,13 @@ if __name__ == "__main__":
     #             203.386, \
     #             0, \
     #             0.8]
+    position = [0.0, \
+                0.0, \
+                0.0, \
+                0, \
+                0, \
+                0, \
+                0]
     count = 0
     while True:
         print(piper.GetArmEndPoseMsgs())
