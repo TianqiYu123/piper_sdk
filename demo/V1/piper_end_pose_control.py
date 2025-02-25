@@ -149,7 +149,7 @@ class RobotArmIK:
             endpos_new = self.left_to_right_hand(endpos[0], endpos[1], endpos[2], endpos[3], endpos[4], endpos[5])
 
             #print("endpos2",endpos_new)
-            print("endpos",endpos)
+            print("endpos_new",endpos_new)
             #x, y, z, rx, ry, rz = endpos  # Unpack end-effector pose
             x, y, z, rx, ry, rz = endpos_new  # Unpack end-effector pose
 
@@ -158,7 +158,7 @@ class RobotArmIK:
 
             # Solve inverse kinematics using the last successful joint angles as the initial guess
             #sol = self.robot.ik_LM(Tep, q0=self.last_successful_q, ilimit=100, slimit=100, tol=1e-2, k=0.5)
-            sol = self.robot.ik_LM(Tep, q0=[0,0,0,0,0,0], ilimit=100, slimit=100, tol=1e-3, k=0.5)
+            sol = self.robot.ik_LM(Tep, q0=[0,0,0,0,0,0], ilimit=500, slimit=200, tol=1e-1, k=0.5)
             theta = sol[0]  # Joint angles
             success = sol[1]  # Success flag (1 if successful, 0 otherwise)
 
@@ -218,6 +218,131 @@ def enable_fun(piper:C_PiperInterface):
 def is_data_available():
     """Check if there's data waiting to be read from stdin (keyboard)."""
     return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
+
+FACTOR = 57324.840764  # A constant, keep it uppercase.
+
+# Initial end pose
+INITIAL_END_POSE = [0, 260, 55, np.pi/2, 0, 0]  # x, y, z, rx, ry, rz (meters and radians)
+
+
+def main():
+    mqtt_handler = MQTTHandler(MQTT_BROKER, MQTT_PORT, MQTT_TOPIC, MQTT_CLIENT_ID)
+    mqtt_handler.connect()
+    piper = C_PiperInterface("can0")  # Assuming can0 is constant, otherwise, make it configurable
+    piper.ConnectPort()
+    piper.EnableArm(7)
+    enable_fun(piper=piper) # Assuming enable_fun does not need endpose.
+
+    arm_ik = RobotArmIK()
+
+    current_end_pose = INITIAL_END_POSE[:]  # Create a copy to avoid modifying the original
+
+
+    try:
+        while True:
+            endpose_delta = mqtt_handler.get_endpose()  # Get *delta* endpose from MQTT
+
+            if endpose_delta:
+                try:  #Add Try-Except to handle the potential wrong end_pose
+
+                    # Convert endpose_delta to numpy array if needed (depending on arm_ik.inverse_kinematics input type)
+                    endpose_delta = [float(x) for x in endpose_delta]  # Ensure values are float
+
+                    if len(endpose_delta) != 6:
+                        print(f"Error: Received delta endpose with incorrect length ({len(endpose_delta)}). Expected 6.")
+                        continue  # Skip this iteration
+
+
+                    # Add the delta to the current end pose
+                    current_end_pose[0] = INITIAL_END_POSE[0] + endpose_delta[0]*1000  # Convert meters to millimeters
+                    current_end_pose[1] = INITIAL_END_POSE[1] + endpose_delta[1]*1000
+                    current_end_pose[2] = INITIAL_END_POSE[2] + endpose_delta[2]*1000
+                    current_end_pose[3] = INITIAL_END_POSE[3]# + endpose_delta[3]*0.1
+                    current_end_pose[4] = INITIAL_END_POSE[4]# + endpose_delta[4]*0.1
+                    current_end_pose[5] = INITIAL_END_POSE[5]# + endpose_delta[5]*0.1
+
+
+                    print(f"Received delta from MQTT: {endpose_delta}")
+                    print(f"Calculated New endpose: {current_end_pose}")
+
+
+                    # Calculate inverse kinematics
+                    joint_angles, success, message, elapsed_time = arm_ik.inverse_kinematics(current_end_pose)  # Capture elapsed_time
+                    #time.sleep(2)
+                    print(f"Success: {success}")
+                    #print(f"Message: {message}")
+                    #print(f"Execution Time: {elapsed_time:.4f} seconds")  # Print the elapsed time, formatted to 4 decimal places
+
+
+                    if success:  # Only move the robot if IK was successful.
+                        joint_0 = round(joint_angles[0] * FACTOR)
+                        joint_1 = round(joint_angles[1] * FACTOR)
+                        joint_2 = round(joint_angles[2] * FACTOR)
+                        joint_3 = round(joint_angles[3] * FACTOR)
+                        joint_4 = round(joint_angles[4] * FACTOR)
+                        joint_5 = round(joint_angles[5] * FACTOR)
+
+                        piper.MotionCtrl_2(0x01, 0x01, 30, 0x00)  # Fixed parameters, probably OK outside loop
+                        piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
+                        time.sleep(0.005)  # Adjust sleep time if needed
+                        
+                except ValueError as ve:
+                    print(f"ValueError processing endpose delta: {ve}")
+                except Exception as e:  # Catch any other exceptions during processing
+                    print(f"Error processing endpose delta: {e}")
+
+            else:
+                print("No endpose delta received from MQTT yet.")
+            time.sleep(0.1)  # Polling interval, reduce from 2s for faster response, but don't overwhelm.
+
+    except KeyboardInterrupt:
+        print("Exiting...")
+    finally:
+        mqtt_handler.disconnect()  # Cleanly disconnect
+        piper.DisconnectPort()  #Disconnect the Piper Interface.
+
+
+if __name__ == "__main__":
+    main()
+
+
+'''
+if __name__ == "__main__":
+    piper = C_PiperInterface("can0")
+    piper.ConnectPort()
+    piper.EnableArm(7)
+    enable_fun(piper=piper)
+    #piper.GripperCtrl(0,1000,0x01, 0)
+    factor = 57324.840764
+
+    arm_ik = RobotArmIK()
+
+    # Example end-effector poses (x, y, z, rx, ry, rz) - meters and radians
+    end_pose = [0, 260, 55, np.pi/2, 0, 0]#initial pose
+    #end_pose = [-322, -67.7, 347, np.pi/2, 0, 0]
+
+    # Calculate inverse kinematics
+    joint_angles, success, message, elapsed_time = arm_ik.inverse_kinematics(end_pose)  # Capture elapsed_time
+    print(f"End Pose: {end_pose}")
+    print(f"Success: {success}")
+    print(f"Message: {message}")
+    print(f"Execution Time: {elapsed_time:.4f} seconds")  # Print the elapsed time, formatted to 4 decimal places
+
+    joint_0 = round(joint_angles[0]*factor)
+    joint_1 = round(joint_angles[1]*factor)
+    joint_2 = round(joint_angles[2]*factor)
+    joint_3 = round(joint_angles[3]*factor)
+    joint_4 = round(joint_angles[4]*factor)
+    joint_5 = round(joint_angles[5]*factor)
+
+    # piper.MotionCtrl_1()
+    piper.MotionCtrl_2(0x01, 0x01, 30, 0x00)
+    piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
+    #piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
+    time.sleep(0.005)
+    pass
+
+
 
 if __name__ == "__main__":
     piper = C_PiperInterface("can0")
@@ -330,40 +455,10 @@ if __name__ == "__main__":
 
     except KeyboardInterrupt:
         print("\nExiting program.")
-'''
-if __name__ == "__main__":
-    piper = C_PiperInterface("can0")
-    piper.ConnectPort()
-    piper.EnableArm(7)
-    enable_fun(piper=piper)
-    #piper.GripperCtrl(0,1000,0x01, 0)
-    factor = 57324.840764
 
-    arm_ik = RobotArmIK()
 
-    # Example end-effector poses (x, y, z, rx, ry, rz) - meters and radians
-    end_pose = [0, 260, 55, np.pi/2, 0, 0]#initial pose
-    #end_pose = [-322, -67.7, 347, np.pi/2, 0, 0]
 
-    # Calculate inverse kinematics
-    joint_angles, success, message, elapsed_time = arm_ik.inverse_kinematics(end_pose)  # Capture elapsed_time
-    print(f"End Pose: {end_pose}")
-    print(f"Success: {success}")
-    print(f"Message: {message}")
-    print(f"Execution Time: {elapsed_time:.4f} seconds")  # Print the elapsed time, formatted to 4 decimal places
 
-    joint_0 = round(joint_angles[0]*factor)
-    joint_1 = round(joint_angles[1]*factor)
-    joint_2 = round(joint_angles[2]*factor)
-    joint_3 = round(joint_angles[3]*factor)
-    joint_4 = round(joint_angles[4]*factor)
-    joint_5 = round(joint_angles[5]*factor)
 
-    # piper.MotionCtrl_1()
-    piper.MotionCtrl_2(0x01, 0x01, 30, 0x00)
-    piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
-    #piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
-    time.sleep(0.005)
-    pass
 '''
         

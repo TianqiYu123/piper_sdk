@@ -69,7 +69,7 @@ class MQTTHandler:  #Encapsulate MQTT functionality in a class
         endpose = process_message(msg.payload.decode())
         if endpose:
             self.endpose = endpose
-            print(f"Received endpose: {self.endpose}")  # Optionally print here
+            #print(f"Received endpose: {self.endpose}")  # Optionally print here
 
     def connect(self):
         """Connects to the MQTT broker and starts the event loop."""
@@ -88,38 +88,3 @@ class MQTTHandler:  #Encapsulate MQTT functionality in a class
         """Returns the most recently received endpose.  Returns None if no endpose has been received yet."""
         return self.endpose
 
-
-
-# my_other_script.py (The script that calls the MQTT code)
-
-import time
-from mqtt_subscriber import MQTTHandler  # Import the class
-
-# Configuration (replace with your actual values)
-MQTT_BROKER = "47.96.170.89"
-MQTT_PORT = 1883
-MQTT_TOPIC = "your/topic"
-MQTT_CLIENT_ID = "my_other_script"  # Use a different client ID
-
-
-def main():
-    mqtt_handler = MQTTHandler(MQTT_BROKER, MQTT_PORT, MQTT_TOPIC, MQTT_CLIENT_ID)
-    mqtt_handler.connect()
-
-    try:
-        while True:
-            endpose = mqtt_handler.get_endpose()
-            if endpose:
-                print(f"My script: Current endpose = {endpose}")
-            else:
-                print("My script: No endpose received yet.")
-            time.sleep(2)  # Check every 2 seconds
-
-    except KeyboardInterrupt:
-        print("Exiting...")
-    finally:
-        mqtt_handler.disconnect()  # Cleanly disconnect
-
-
-if __name__ == "__main__":
-    main()
