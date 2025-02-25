@@ -6,12 +6,21 @@ from math import pi
 from spatialmath import SE3
 from scipy.spatial.transform import Rotation
 import roboticstoolbox as rtb 
+import sys
+import select
+from mqtt_receive import MQTTHandler
 
 from typing import (
     Optional,
 )
 import time
 from piper_sdk import *
+
+MQTT_BROKER = "47.96.170.89"  #MQTT broker address
+MQTT_PORT = 8003 # Default MQTT port.  If you are using a different port, change this.  8003 is typically a web port (HTTP).
+MQTT_TOPIC = "arm/pose/#"  # MQTT topic you are subscribing to
+MQTT_CLIENT_ID = "endpose_reader" #client ID
+
 
 class RobotArmIK:
     """
@@ -206,6 +215,122 @@ def enable_fun(piper:C_PiperInterface):
         print("程序自动使能超时,退出程序")
         exit(0)
 
+def is_data_available():
+    """Check if there's data waiting to be read from stdin (keyboard)."""
+    return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
+
+if __name__ == "__main__":
+    piper = C_PiperInterface("can0")
+    piper.ConnectPort()
+    piper.EnableArm(7)
+    enable_fun(piper=piper)
+    #piper.GripperCtrl(0,1000,0x01, 0)
+    factor = 57324.840764
+
+    arm_ik = RobotArmIK()
+
+    # Initial end-effector pose
+    x = 0.0
+    y = 260.0
+    z = 55.0
+    rx = np.pi / 2
+    ry = 0.0
+    rz = 0.0
+
+    step_size_pos = 10  # Adjustment step for position (x, y, z)
+    step_size_rot = np.pi / 36  # Adjustment step for rotation (rx, ry, rz) - 5 degrees
+
+    print("\nControl the end-effector pose:")
+    print("  q/a: Adjust X ({}). Limits: -650 to 650".format(x))
+    print("  w/s: Adjust Y ({}). Limits: -650 to 650".format(y))
+    print("  e/d: Adjust Z ({}). Limits: -650 to 650".format(z))
+    print("  r/f: Adjust Rx ({}). Limits: -pi to pi".format(rx))
+    print("  t/g: Adjust Ry ({}). Limits: -pi to pi".format(ry))
+    print("  y/h: Adjust Rz ({}). Limits: -pi to pi".format(rz))
+    print("  Press Ctrl+C to exit.")
+
+    try:
+        while True:
+            if is_data_available():
+                key = sys.stdin.read(1).lower()  # Read one character
+
+                if key == 'q':
+                    x += step_size_pos
+                    x = min(max(x, -650), 650)
+                elif key == 'a':
+                    x -= step_size_pos
+                    x = min(max(x, -650), 650)
+                elif key == 'w':
+                    y += step_size_pos
+                    y = min(max(y, -650), 650)
+                elif key == 's':
+                    y -= step_size_pos
+                    y = min(max(y, -650), 650)
+                elif key == 'e':
+                    z += step_size_pos
+                    z = min(max(z, -650), 650)
+                elif key == 'd':
+                    z -= step_size_pos
+                    z = min(max(z, -650), 650)
+                elif key == 'r':
+                    rx += step_size_rot
+                    rx = min(max(rx, -np.pi), np.pi)
+                elif key == 'f':
+                    rx -= step_size_rot
+                    rx = min(max(rx, -np.pi), np.pi)
+                elif key == 't':
+                    ry += step_size_rot
+                    ry = min(max(ry, -np.pi), np.pi)
+                elif key == 'g':
+                    ry -= step_size_rot
+                    ry = min(max(ry, -np.pi), np.pi)
+                elif key == 'y':
+                    rz += step_size_rot
+                    rz = min(max(rz, -np.pi), np.pi)
+                elif key == 'h':
+                    rz -= step_size_rot
+                    rz = min(max(rz, -np.pi), np.pi)
+                elif ord(key) == 3:  # Check for Ctrl+C (ASCII code 3)
+                    raise KeyboardInterrupt
+                else:
+                    print("Invalid command.")
+                    continue
+
+                # Update the end_pose
+                end_pose = [x, y, z, rx, ry, rz]
+
+                # Calculate inverse kinematics
+                joint_angles, success, message, elapsed_time = arm_ik.inverse_kinematics(end_pose)  # Capture elapsed_time
+
+                if not success or joint_angles is None:  # Check for IK failure
+                    print(f"IK Failed. Skipping this pose.")
+                    print(f"Message: {message}")
+                    continue # Skip the rest of the loop
+
+                print(f"End Pose: {end_pose}")
+                print(f"Success: {success}")
+                print(f"Message: {message}")
+                print(f"Execution Time: {elapsed_time:.4f} seconds")
+
+                joint_0 = round(joint_angles[0]*factor)
+                joint_1 = round(joint_angles[1]*factor)
+                joint_2 = round(joint_angles[2]*factor)
+                joint_3 = round(joint_angles[3]*factor)
+                joint_4 = round(joint_angles[4]*factor)
+                joint_5 = round(joint_angles[5]*factor)
+
+                # piper.MotionCtrl_1()
+                piper.MotionCtrl_2(0x01, 0x01, 30, 0x00)
+                piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
+                #piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
+                time.sleep(0.005)
+
+            else:
+                time.sleep(0.01)  # Small delay to avoid busy-waiting
+
+    except KeyboardInterrupt:
+        print("\nExiting program.")
+'''
 if __name__ == "__main__":
     piper = C_PiperInterface("can0")
     piper.ConnectPort()
@@ -240,25 +365,5 @@ if __name__ == "__main__":
     #piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
     time.sleep(0.005)
     pass
-
 '''
-        # Print results
-        print(f"End Pose: {end_pose}")
-        print(f"Success: {success}")
-        print(f"Message: {message}")
-        print(f"Execution Time: {elapsed_time:.4f} seconds")  # Print the elapsed time, formatted to 4 decimal places
-        
-        if success:
-            print(f"Joint Angles: {joint_angles}")
-
-            # Verify the solution using forward kinematics
-            T = arm_ik.robot.fkine(joint_angles)
-            print("------------------check result by forward kinematics------------------")
-            print(T)
-        else:
-            print("Inverse kinematics failed.")
-        print("-------------------------------------")
-'''
-
-    #position = [0, 0, 0, 0, 0, 0]
         
