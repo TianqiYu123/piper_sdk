@@ -1,4 +1,6 @@
 import paho.mqtt.client as mqtt
+import transforms3d.euler as euler
+import numpy as np
 import json
 
 MQTT_BROKER = "47.96.170.89"  # Replace with your MQTT broker address
@@ -17,35 +19,42 @@ def on_connect(client, userdata, flags, rc):
 
 
 def process_message(payload):
-    """Processes the MQTT message payload and returns the endpose.
+    """Processes the MQTT message payload and returns the endpose and trigger.
 
     Args:
         payload: The MQTT message payload as a string.
 
     Returns:
-        A list representing the endpose (first 6 elements of 'info') or None if there's an error.
+        A tuple containing the endpose (x, y, z, rx, ry, rz) and the trigger (0 or 1), 
+        or (None, None) if there's an error.
     """
     try:
         data = json.loads(payload)
 
-        if "info" in data and isinstance(data["info"], list) and len(data["info"]) >= 6:
-            endpose = data["info"][:6]  # Extract the first 6 elements
-            return endpose
+        if "info" in data and isinstance(data["info"], list) and len(data["info"]) == 9:
+            x, y, z, qx, qy, qz, qw, trigger,temp = data["info"]
+            #print("trigger",trigger)
+            # Convert quaternion to Euler angles (rx, ry, rz)
+            # Note: The order of rotation is 'xyz' which is a common convention.
+            rx, ry, rz = euler.quat2euler([qw, qx, qy, qz], 'sxyz')
+
+            endpose = [x, y, z, rx, ry, rz]
+            return endpose, int(trigger)
         else:
-            print("Invalid data format: 'info' key missing, not a list, or less than 6 elements.")
+            print("Invalid data format: 'info' key missing, not a list, or not exactly 8 elements.")
             print(f"Received message: {payload}")  # print the entire message to help with debugging
-            return None  # Indicate an error
+            return None, None  # Indicate an error
     except json.JSONDecodeError:
         print("Error decoding JSON from MQTT message.")
         print(f"Received message: {payload}")
-        return None  # Indicate an error
+        return None, None  # Indicate an error
     except Exception as e:
         print(f"An error occurred: {e}")
         print(f"Received message: {payload}")
-        return None #Indicate an error
+        return None, None  # Indicate an error
 
 
-class MQTTHandler:  #Encapsulate MQTT functionality in a class
+class MQTTHandler:
     def __init__(self, broker, port, topic, client_id):
         self.broker = broker
         self.port = port
@@ -55,6 +64,7 @@ class MQTTHandler:  #Encapsulate MQTT functionality in a class
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
         self.endpose = None  # Store the most recently received endpose
+        self.trigger = None  # Store the most recently received trigger
 
     def on_connect(self, client, userdata, flags, rc):
         """Callback function when the MQTT client connects to the broker."""
@@ -66,10 +76,11 @@ class MQTTHandler:  #Encapsulate MQTT functionality in a class
 
     def on_message(self, client, userdata, msg):
         """Callback function when a message is received from the MQTT broker."""
-        endpose = process_message(msg.payload.decode())
-        if endpose:
+        endpose, trigger = process_message(msg.payload.decode())
+        if endpose is not None:
             self.endpose = endpose
-            #print(f"Received endpose: {self.endpose}")  # Optionally print here
+            self.trigger = trigger
+            print(f"Received endpose: {self.endpose}, Trigger: {self.trigger}")
 
     def connect(self):
         """Connects to the MQTT broker and starts the event loop."""
@@ -85,6 +96,6 @@ class MQTTHandler:  #Encapsulate MQTT functionality in a class
         self.client.disconnect()
 
     def get_endpose(self):
-        """Returns the most recently received endpose.  Returns None if no endpose has been received yet."""
-        return self.endpose
-
+        """Returns the most recently received endpose and trigger.
+        Returns (None, None) if no message has been received yet."""
+        return self.endpose, self.trigger
