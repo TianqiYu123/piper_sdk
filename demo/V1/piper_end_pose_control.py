@@ -158,7 +158,8 @@ class RobotArmIK:
 
             # Solve inverse kinematics using the last successful joint angles as the initial guess
             #sol = self.robot.ik_LM(Tep, q0=self.last_successful_q, ilimit=100, slimit=100, tol=1e-2, k=0.5)
-            sol = self.robot.ik_LM(Tep, q0=[0,0,0,0,0,0], ilimit=500, slimit=200, tol=1e-1, k=0.5)
+            #sol = self.robot.ik_LM(Tep, q0=[0,0,0,0,0,0], ilimit=500, slimit=200, tol=1e-1, k=0.5)
+            sol = self.robot.ik_LM(Tep, q0=[0,0,0,0,0,0], ilimit=500, slimit=300, tol=1e-1, mask = [1,1,1,0.6,0.6,0.6],joint_limits = 1,k=0.5,method = 'chan')
             theta = sol[0]  # Joint angles
             success = sol[1]  # Success flag (1 if successful, 0 otherwise)
 
@@ -306,9 +307,9 @@ def main():
 
 
                     # Calculate delta from calibration pose
-                    delta_x = (endpose_delta[0] - calibration_pose[0])*900 #mm
-                    delta_y = (endpose_delta[1] - calibration_pose[1])*900 #mm
-                    delta_z = (endpose_delta[2] - calibration_pose[2])*900 #mm
+                    delta_x = (endpose_delta[0] - calibration_pose[0])*1000 #mm
+                    delta_y = (endpose_delta[1] - calibration_pose[1])*1000 #mm
+                    delta_z = (endpose_delta[2] - calibration_pose[2])*1000 #mm
                     delta_rx = (endpose_delta[3] - calibration_pose[3])*1 #rad
                     delta_ry = (endpose_delta[4] - calibration_pose[4])*1 #rad
                     delta_rz = (endpose_delta[5] - calibration_pose[5])*1 #rad
