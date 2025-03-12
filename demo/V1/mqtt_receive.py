@@ -31,15 +31,15 @@ def process_message(payload):
     try:
         data = json.loads(payload)
 
-        if "info" in data and isinstance(data["info"], list) and len(data["info"]) == 9:
-            x, y, z, qx, qy, qz, qw, trigger,temp = data["info"]
+        if "info" in data and isinstance(data["info"], list) and len(data["info"]) == 15:
+            x, y, z, qx, qy, qz, qw, trigger,joystickX,joystickY,joystickClick,buttonA,buttonB,grip,temp = data["info"]
             #print("trigger",trigger)
             # Convert quaternion to Euler angles (rx, ry, rz)
             # Note: The order of rotation is 'xyz' which is a common convention.
             rx, ry, rz = euler.quat2euler([qw, qx, qy, qz], 'sxyz')
 
             endpose = [x, y, z, rx, ry, rz]
-            return endpose, int(trigger)
+            return endpose, int(trigger), joystickX, joystickY, int(joystickClick), int(buttonA), int(buttonB), int(grip)
         else:
             print("Invalid data format: 'info' key missing, not a list, or not exactly 8 elements.")
             print(f"Received message: {payload}")  # print the entire message to help with debugging
@@ -65,6 +65,12 @@ class MQTTHandler:
         self.client.on_message = self.on_message
         self.endpose = None  # Store the most recently received endpose
         self.trigger = None  # Store the most recently received trigger
+        self.joystickX = None
+        self.joystickY = None
+        self.joystickClick = None
+        self.buttonA = None
+        self.buttonB = None
+        self.grip = None
 
     def on_connect(self, client, userdata, flags, rc):
         """Callback function when the MQTT client connects to the broker."""
@@ -76,11 +82,17 @@ class MQTTHandler:
 
     def on_message(self, client, userdata, msg):
         """Callback function when a message is received from the MQTT broker."""
-        endpose, trigger = process_message(msg.payload.decode())
+        endpose, trigger,joystickX,joystickY,joystickClick,buttonA,buttonB,grip = process_message(msg.payload.decode())
         if endpose is not None:
             self.endpose = endpose
             self.trigger = trigger
-            print(f"Received endpose: {self.endpose}, Trigger: {self.trigger}")
+            self.joystickX = joystickX
+            self.joystickY = joystickY
+            self.joystickClick = joystickClick
+            self.buttonA = buttonA
+            self.buttonB = buttonB
+            self.grip = grip
+            #print(f"Received endpose: {self.endpose}, Trigger: {self.trigger}")
 
     def connect(self):
         """Connects to the MQTT broker and starts the event loop."""
@@ -95,7 +107,7 @@ class MQTTHandler:
         self.client.loop_stop() # Stop the loop first
         self.client.disconnect()
 
-    def get_endpose(self):
+    def get_righthand(self):
         """Returns the most recently received endpose and trigger.
         Returns (None, None) if no message has been received yet."""
-        return self.endpose, self.trigger
+        return self.endpose, self.trigger, self.joystickX, self.joystickY, self.joystickClick, self.buttonA, self.buttonB, self.grip
