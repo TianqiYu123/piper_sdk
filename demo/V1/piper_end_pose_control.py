@@ -84,46 +84,6 @@ class RobotArmIK:
 
         self.last_successful_q = [0, 0, 0, 0, 0, 0]  # Initialize with a default initial guess
 
-
-    def left_to_right_hand(self, x_left, y_left, z_left, rx_left, ry_left, rz_left):
-        """
-        Converts a pose (x, y, z, rx, ry, rz) from a left-handed coordinate system to a right-handed
-        coordinate system using a custom coordinate axis transformation, while eliminating the initial
-        rotation introduced by the coordinate axis transformation itself.
-
-        Args:
-            x_left, y_left, z_left: Position coordinates in the left-handed coordinate system.
-            rx_left, ry_left, rz_left: Euler angles (Roll, Pitch, Yaw) in radians in the left-handed
-                                        coordinate system (ZYX order).
-
-        Returns:
-            x_right, y_right, z_right, rx_right, ry_right, rz_right:
-            The pose (position and Euler angles) in the right-handed coordinate system.
-        """
-
-        # Position transformation
-        x_right = z_left
-        y_right = -x_left
-        z_right = y_left
-
-        # Rotation matrix transformation
-        r_left = Rotation.from_euler('zyx', [rz_left, ry_left, rx_left])  # Note: scipy's Euler angle order (ZYX)
-        rot_matrix_left = r_left.as_matrix()
-
-        # Direction transformation matrix
-        transform_matrix = np.array([
-            [0, 0, 1],
-            [-1, 0, 0],
-            [0, 1, 0]
-        ])
-
-        # Inverse transformation matrix, to eliminate the initial rotation
-        transform_matrix_inv = transform_matrix.T  # The inverse of an orthogonal matrix equals its transpose
-
-        rot_matrix_right = transform_matrix @ rot_matrix_left @ transform_matrix_inv  # Inverse transform, rotation, forward transform
-        r_right = Rotation.from_matrix(rot_matrix_right)
-        rz_right, ry_right, rx_right = r_right.as_euler('zyx')  # Note Euler angle order
-        return [x_right, y_right, z_right, rx_right, ry_right, rz_right]
     
     
     def inverse_kinematics(self, endpos):
@@ -146,12 +106,12 @@ class RobotArmIK:
 
         try:
             #print("endpos",endpos)
-            endpos_new = self.left_to_right_hand(endpos[0], endpos[1], endpos[2], endpos[3], endpos[4], endpos[5])
+            #endpos_new = self.left_to_right_hand(endpos[0], endpos[1], endpos[2], endpos[3], endpos[4], endpos[5])
 
             #print("endpos2",endpos_new)
-            print("endpos_righthand",int(endpos_new[0]),int(endpos_new[1]),int(endpos_new[2]),endpos_new[3],endpos_new[4],endpos_new[5])
+            print("endpos_righthand",int(endpos[0]),int(endpos[1]),int(endpos[2]),endpos[3],endpos[4],endpos[5])
             #x, y, z, rx, ry, rz = endpos  # Unpack end-effector pose
-            x, y, z, rx, ry, rz = endpos_new  # Unpack end-effector pose
+            x, y, z, rx, ry, rz = endpos  # Unpack end-effector pose
 
             # Create the SE3 transformation matrix using RPY angles
             Tep = SE3.Trans(x, y, z) * SE3.RPY(rx, ry, rz)  # important, you can chose RPY or Euler
@@ -223,8 +183,8 @@ def is_data_available():
 FACTOR = 57324.840764  # A constant, keep it uppercase.
 
 # Initial end pose
-INITIAL_END_POSE = [0, 260, 55, np.pi/2, 0, 0]  # x, y, z, rx, ry, rz (meters and radians)
-
+#INITIAL_END_POSE = [0, 260, 55, np.pi/2, 0, 0]  # x, y, z, rx, ry, rz (meters and radians)
+INITIAL_END_POSE = [55, 0, 260,0,  np.pi/2, 0]
 
 def main():
     mqtt_handler = MQTTHandler(MQTT_BROKER, MQTT_PORT, MQTT_TOPIC, MQTT_CLIENT_ID)
@@ -324,8 +284,8 @@ def main():
                                     INITIAL_END_POSE[5] + delta_rz] #roll, controled by left/right
 
                     current_end_pose = new_end_pose[:] #copy to memory
-                    if current_end_pose[1] < 150:
-                        current_end_pose[1] = 150
+                    #if current_end_pose[1] < 150:
+                    #    current_end_pose[1] = 150
 
                     #print(f"Received delta from MQTT: {endpose_delta}")
                     #print(f"Calculated New endpose: {current_end_pose}")

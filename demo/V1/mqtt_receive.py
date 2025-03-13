@@ -2,6 +2,7 @@ import paho.mqtt.client as mqtt
 import transforms3d.euler as euler
 import numpy as np
 import json
+from scipy.spatial.transform import Rotation
 
 MQTT_BROKER = "47.96.170.89"  # Replace with your MQTT broker address
 MQTT_PORT = 8003 # Default MQTT port.  If you are using a different port, change this.  8003 is typically a web port (HTTP).
@@ -17,6 +18,45 @@ def on_connect(client, userdata, flags, rc):
     else:
         print(f"Failed to connect, return code {rc}")
 
+def left_to_right_hand(x_left, y_left, z_left, rx_left, ry_left, rz_left):
+        """
+        Converts a pose (x, y, z, rx, ry, rz) from a left-handed coordinate system to a right-handed
+        coordinate system using a custom coordinate axis transformation, while eliminating the initial
+        rotation introduced by the coordinate axis transformation itself.
+
+        Args:
+            x_left, y_left, z_left: Position coordinates in the left-handed coordinate system.
+            rx_left, ry_left, rz_left: Euler angles (Roll, Pitch, Yaw) in radians in the left-handed
+                                        coordinate system (ZYX order).
+
+        Returns:
+            x_right, y_right, z_right, rx_right, ry_right, rz_right:
+            The pose (position and Euler angles) in the right-handed coordinate system.
+        """
+
+        # Position transformation
+        x_right = z_left
+        y_right = -x_left
+        z_right = y_left
+
+        # Rotation matrix transformation
+        r_left = Rotation.from_euler('zyx', [rz_left, ry_left, rx_left])  # Note: scipy's Euler angle order (ZYX)
+        rot_matrix_left = r_left.as_matrix()
+
+        # Direction transformation matrix
+        transform_matrix = np.array([
+            [0, 0, 1],
+            [-1, 0, 0],
+            [0, 1, 0]
+        ])
+
+        # Inverse transformation matrix, to eliminate the initial rotation
+        transform_matrix_inv = transform_matrix.T  # The inverse of an orthogonal matrix equals its transpose
+
+        rot_matrix_right = transform_matrix @ rot_matrix_left @ transform_matrix_inv  # Inverse transform, rotation, forward transform
+        r_right = Rotation.from_matrix(rot_matrix_right)
+        rz_right, ry_right, rx_right = r_right.as_euler('zyx')  # Note Euler angle order
+        return [x_right, y_right, z_right, rx_right, ry_right, rz_right]
 
 def process_message(payload):
     """Processes the MQTT message payload and returns the endpose and trigger.
@@ -38,7 +78,8 @@ def process_message(payload):
             # Note: The order of rotation is 'xyz' which is a common convention.
             rx, ry, rz = euler.quat2euler([qw, qx, qy, qz], 'sxyz')
 
-            endpose = [x, y, z, rx, ry, rz]
+            #endpose = [x, y, z, rx, ry, rz]
+            endpose = left_to_right_hand(x, y, z, rx, ry, rz)
             return endpose, int(trigger), joystickX, joystickY, int(joystickClick), int(buttonA), int(buttonB), int(grip)
         else:
             print("Invalid data format: 'info' key missing, not a list, or not exactly 8 elements.")
