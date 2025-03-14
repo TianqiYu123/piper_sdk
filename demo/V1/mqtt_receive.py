@@ -175,6 +175,69 @@ class RobotArmIK:
                                      rx, ry, rz are Euler angles (RPY - Roll, Pitch, Yaw).
 
         Returns:
+                        current_end_pose = INITIAL_END_POSE[:] #Reset to origin
+                        calibration_pose = None # Clear Calibration
+                    trigger_state = 0 #Reset Trigger state
+
+
+                elif trigger == 1: #Trigger is pressed.
+                    trigger_state = 1  #set it to active, so when release it can go back to origin
+
+                    if calibration_pose is None: #calibration hasn't happened yet, get the end pose
+
+                        #Here, you'll grab endpose_delta upon first pressing trigger, so will calibrate the machine from this location.
+                        #After setting calibration_pose = endpose_delta, calculate motion as (next endpose - previous endpose) + initial pose.
+                        calibration_pose = endpose_delta[:] # Take snapshot from first measurement
+
+                        print("Trigger pressed. Calibrating to current pose as zero point...")
+
+
+                    # Calculate delta from calibration pose
+                    delta_x = (endpose_delta[0] - calibration_pose[0])*1000 #mm
+                    delta_y = (endpose_delta[1] - calibration_pose[1])*1000 #mm
+                    delta_z = (endpose_delta[2] - calibration_pose[2])*1000 #mm
+                    delta_rx = (endpose_delta[3] - calibration_pose[3])*1 #rad
+                    delta_ry = (endpose_delta[4] - calibration_pose[4])*1 #rad
+                    delta_rz = (endpose_delta[5] - calibration_pose[5])*1 #rad
+                    #delta_rx = joystickY*np.pi/2
+                    #delta_rz = joystickX*np.pi/2
+
+
+                    # Apply the calibrated delta to the INITIAL END POSE.
+                    new_end_pose = [INITIAL_END_POSE[0] + delta_x,
+                                    INITIAL_END_POSE[1] + delta_y,
+                                    INITIAL_END_POSE[2] + delta_z,
+                                    INITIAL_END_POSE[3] + delta_rx, #pitch, controled by forward/backward
+                                    INITIAL_END_POSE[4] + delta_ry, #yaw, controled by the IMU
+                                    INITIAL_END_POSE[5] + delta_rz] #roll, controled by left/right
+
+                    current_end_pose = new_end_pose[:] #copy to memory
+                    #if current_end_pose[1] < 150:
+                    #    current_end_pose[1] = 150
+
+                    #print(f"Received delta from MQTT: {endpose_delta}")
+                    #print(f"Calculated New endpose: {current_end_pose}")
+
+                    # Calculate inverse kinematics
+                    joint_angles, success, message, elapsed_time = arm_ik.inverse_kinematics(current_end_pose)
+
+                    if success:
+                        joint_0 = round(joint_angles[0] * FACTOR)
+                        joint_1 = round(joint_angles[1] * FACTOR)
+                        joint_2 = round(joint_angles[2] * FACTOR)
+                        joint_3 = round(joint_angles[3] * FACTOR)
+                        joint_4 = round(joint_angles[4] * FACTOR)
+                        joint_5 = round((joint_angles[5]+1.2653) * FACTOR)
+                        piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
+                        piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
+                        time.sleep(0.001)
+                    else:
+                        print(f"IK Failed message: {message}")
+
+                else:
+                    print(f"Invalid trigger value: {trigger}. Expected 0 or 1.")
+
+            else:
             tuple: A tuple containing:
                 - theta (numpy.ndarray): Joint angles if successful, None otherwise.
                 - success (bool): True if IK solution is found, False otherwise.
@@ -196,9 +259,9 @@ class RobotArmIK:
             Tep = SE3.Trans(x, y, z) * SE3.RPY(rx, ry, rz)  # important, you can chose RPY or Euler
 
             # Solve inverse kinematics using the last successful joint angles as the initial guess
-            #sol = self.robot.ik_LM(Tep, q0=self.last_successful_q, ilimit=100, slimit=100, tol=1e-2, k=0.5)
             #sol = self.robot.ik_LM(Tep, q0=[0,0,0,0,0,0], ilimit=500, slimit=200, tol=1e-1, k=0.5)
-            sol = self.robot.ik_LM(Tep, q0=[0,0,0,0,0,0], ilimit=500, slimit=300, tol=1e-2, mask = [1,1,1,100,100,100],joint_limits = 1,k=0.5,method = 'chan')
+            #sol = self.robot.ik_LM(Tep, q0=[0,0,0,0,0,0], ilimit=500, slimit=300, tol=1e-2, mask = [1,1,1,100,100,100],joint_limits = 1,k=0.5,method = 'chan')
+            sol = self.robot.ik_LM(Tep, q0=self.last_successful_q, ilimit=500, slimit=300, tol=1e-2, mask = [1,1,1,100,100,100],joint_limits = 1,k=0.5,method = 'chan')
             theta = sol[0]  # Joint angles
             success = sol[1]  # Success flag (1 if successful, 0 otherwise)
 

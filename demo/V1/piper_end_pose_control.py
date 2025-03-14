@@ -88,7 +88,7 @@ def main():
                 try:
                     endpose_delta = [float(x) for x in endpose_delta] # cast to float
                     trigger = int(trigger) # cast to int
-                    grip = int(grip) # cast to int
+                    #grip = int(grip) # cast to int
 
 
                     if len(endpose_delta) != 6:
@@ -113,9 +113,11 @@ def main():
                             joint_3 = round(joint_angles[3] * FACTOR)
                             joint_4 = round(joint_angles[4] * FACTOR)
                             joint_5 = round((joint_angles[5]+1.2653) * FACTOR)
+                            joint_6 = round(0.2*1000*1000)
                             print(f"return to initial pose: {joint_0, joint_1, joint_2, joint_3, joint_4, joint_5}") 
                             piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
                             piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
+                            piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
                             time.sleep(0.005)
                         else:
                             print(f"Failed to return to initial pose: {message}") #failure message
@@ -142,11 +144,11 @@ def main():
                     delta_x = (endpose_delta[0] - calibration_pose[0])*1000 #mm
                     delta_y = (endpose_delta[1] - calibration_pose[1])*1000 #mm
                     delta_z = (endpose_delta[2] - calibration_pose[2])*1000 #mm
-                    #delta_rx = (endpose_delta[3] - calibration_pose[3])*1 #rad
+                    delta_rx = (endpose_delta[3] - calibration_pose[3])*1 #rad
                     delta_ry = (endpose_delta[4] - calibration_pose[4])*1 #rad
-                    #delta_rz = (endpose_delta[5] - calibration_pose[5])*1 #rad
-                    delta_rx = joystickY*np.pi/2
-                    delta_rz = joystickX*np.pi/2
+                    delta_rz = (endpose_delta[5] - calibration_pose[5])*1 #rad
+                    #delta_rx = joystickY*np.pi/2
+                    #delta_rz = joystickX*np.pi/2
 
 
                     # Apply the calibrated delta to the INITIAL END POSE.
@@ -174,8 +176,11 @@ def main():
                         joint_3 = round(joint_angles[3] * FACTOR)
                         joint_4 = round(joint_angles[4] * FACTOR)
                         joint_5 = round((joint_angles[5]+1.2653) * FACTOR)
+                        joint_6 = round((1-grip)/5*1000*1000)
+
                         piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
                         piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
+                        piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
                         time.sleep(0.001)
                     else:
                         print(f"IK Failed message: {message}")
