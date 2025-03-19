@@ -75,6 +75,7 @@ def main():
     arm_ik = RobotArmIK()
 
     current_end_pose = INITIAL_END_POSE[:]  # Create a copy
+    old_end_pose = INITIAL_END_POSE[:]
     calibration_pose = None # will store the calibration snapshot
 
     trigger_state = 0 #Initial state
@@ -154,13 +155,13 @@ def main():
                         INITIAL_END_POSE[5] + delta_rz,
                     ]
 
-                    #current_end_pose = new_end_pose[:]
+                    current_end_pose = new_end_pose[:]
 
                     # Compute trajectory
                     #T0 = SE3.Trans(*current_end_pose[:3]) * SE3.RPY(*current_end_pose[3:])
                     #T1 = SE3.Trans(*new_end_pose[:3]) * SE3.RPY(*new_end_pose[3:])
                     T0 = SE3.Trans(*old_end_pose[:3]) * SE3.RPY(*old_end_pose[3:])
-                    T1 = SE3.Trans(*new_end_pose[:3]) * SE3.RPY(*new_end_pose[3:])
+                    T1 = SE3.Trans(*current_end_pose[:3]) * SE3.RPY(*current_end_pose[3:])
                     trajectory = rtb.tools.trajectory.ctraj(T0, T1, N_SAMPLES)
 
                     for Tep in trajectory:
@@ -182,7 +183,7 @@ def main():
 
                         else:
                             print(f"IK Failed message: {message}")
-                    old_end_pose = new_end_pose[:]
+                    old_end_pose = current_end_pose[:]
 
             #time.sleep(0.001)
 
