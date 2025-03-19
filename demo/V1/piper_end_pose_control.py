@@ -58,6 +58,9 @@ def is_data_available():
 
 FACTOR = 57324.840764  # A constant, keep it uppercase.
 
+# Number of interpolation points
+N_SAMPLES = 10  # Adjust for smoother motion
+
 # Initial end pose
 INITIAL_END_POSE = [55, 0, 260,0,  np.pi/2, 0]
 
@@ -79,6 +82,116 @@ def main():
 
     time.sleep(2)  # Give MQTT client time to connect and receive initial messages
 
+
+    try:
+        while True:
+            endpose_delta, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip = mqtt_handler.get_righthand()
+
+            if endpose_delta is not None and trigger is not None:
+                try:
+                    endpose_delta = [float(x) for x in endpose_delta]
+                    trigger = int(trigger)
+
+                    if len(endpose_delta) != 6:
+                        print(f"Error: Incorrect endpose length ({len(endpose_delta)}), expected 6.")
+                        continue
+
+                except (ValueError, TypeError) as e:
+                    print(f"Error unpacking MQTT: {e}")
+                    continue
+
+                if trigger == 0:  # If the trigger is released, return to the initial pose
+                    if trigger_state == 1:
+                        print("Trigger released. Returning to initial pose...")
+                        T0 = SE3.Trans(*current_end_pose[:3]) * SE3.RPY(*current_end_pose[3:])
+                        T1 = SE3.Trans(*INITIAL_END_POSE[:3]) * SE3.RPY(*INITIAL_END_POSE[3:])
+
+                        trajectory = rtb.tools.trajectory.ctraj(T0, T1, N_SAMPLES)  # Generate smooth trajectory
+
+                        for Tep in trajectory:
+                            joint_angles, success, message, elapsed_time = arm_ik.inverse_kinematics(Tep)
+                            if success:
+                                joint_0 = round(joint_angles[0] * FACTOR)
+                                joint_1 = round(joint_angles[1] * FACTOR)
+                                joint_2 = round(joint_angles[2] * FACTOR)
+                                joint_3 = round(joint_angles[3] * FACTOR)
+                                joint_4 = round(joint_angles[4] * FACTOR)
+                                #joint_5 = round((joint_angles[5] + 1.2653) * FACTOR)
+                                joint_5 = round((joint_angles[5]) * FACTOR)
+                                joint_6 = round(0.2 * 1000 * 1000)
+
+                                piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
+                                piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
+                                piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
+                                #time.sleep(0.001)  # Adjust for smooth motion
+
+                        current_end_pose = INITIAL_END_POSE[:]  # Reset to origin
+                        old_end_pose = INITIAL_END_POSE[:]
+                        calibration_pose = None  # Clear calibration
+                    trigger_state = 0  # Reset trigger state
+
+                elif trigger == 1:  # If trigger is pressed
+                    trigger_state = 1
+
+                    if calibration_pose is None:
+                        calibration_pose = endpose_delta[:]
+                        print("Trigger pressed. Calibrating to current pose as zero point...")
+
+                    # Compute new target pose
+                    delta_x = (endpose_delta[0] - calibration_pose[0]) * 1000  # Convert to mm
+                    delta_y = (endpose_delta[1] - calibration_pose[1]) * 1000
+                    delta_z = (endpose_delta[2] - calibration_pose[2]) * 1000
+                    delta_rx = (endpose_delta[3] - calibration_pose[3]) * 1  # In radians
+                    delta_ry = (endpose_delta[4] - calibration_pose[4]) * 1
+                    delta_rz = (endpose_delta[5] - calibration_pose[5]) * 1
+
+                    new_end_pose = [
+                        INITIAL_END_POSE[0] + delta_x,
+                        INITIAL_END_POSE[1] + delta_y,
+                        INITIAL_END_POSE[2] + delta_z,
+                        INITIAL_END_POSE[3] + delta_rx,
+                        INITIAL_END_POSE[4] + delta_ry,
+                        INITIAL_END_POSE[5] + delta_rz,
+                    ]
+
+                    #current_end_pose = new_end_pose[:]
+
+                    # Compute trajectory
+                    #T0 = SE3.Trans(*current_end_pose[:3]) * SE3.RPY(*current_end_pose[3:])
+                    #T1 = SE3.Trans(*new_end_pose[:3]) * SE3.RPY(*new_end_pose[3:])
+                    T0 = SE3.Trans(*old_end_pose[:3]) * SE3.RPY(*old_end_pose[3:])
+                    T1 = SE3.Trans(*new_end_pose[:3]) * SE3.RPY(*new_end_pose[3:])
+                    trajectory = rtb.tools.trajectory.ctraj(T0, T1, N_SAMPLES)
+
+                    for Tep in trajectory:
+                        joint_angles, success, message, elapsed_time = arm_ik.inverse_kinematics(Tep)
+                        if success:
+                            joint_0 = round(joint_angles[0] * FACTOR)
+                            joint_1 = round(joint_angles[1] * FACTOR)
+                            joint_2 = round(joint_angles[2] * FACTOR)
+                            joint_3 = round(joint_angles[3] * FACTOR)
+                            joint_4 = round(joint_angles[4] * FACTOR)
+                            joint_5 = round((joint_angles[5]) * FACTOR)
+                            #joint_5 = round((joint_angles[5] + 1.2653) * FACTOR)
+                            joint_6 = round((1 - grip) / 5 * 1000 * 1000)
+
+                            piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
+                            piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
+                            piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
+                            #time.sleep(0.001)
+
+                        else:
+                            print(f"IK Failed message: {message}")
+                    old_end_pose = new_end_pose[:]
+
+            #time.sleep(0.001)
+
+    except KeyboardInterrupt:
+        print("Exiting...")
+    finally:
+        mqtt_handler.disconnect()
+        piper.DisconnectPort()
+'''
     try:
         while True:
             #get righthand data from MQTT
@@ -108,7 +221,7 @@ def main():
                         joint_angles, success, message, elapsed_time = arm_ik.inverse_kinematics(INITIAL_END_POSE)
                         if success:
                             joint_0 = round(joint_angles[0] * FACTOR)
-                            joint_1 = round(joint_angles[1] * FACTOR)
+                            joint_1 = round(joint_angles[1] * FACTOR)joint_5 = round((joint_angles[5]) * FACTOR)
                             joint_2 = round(joint_angles[2] * FACTOR)
                             joint_3 = round(joint_angles[3] * FACTOR)
                             joint_4 = round(joint_angles[4] * FACTOR)
@@ -166,8 +279,16 @@ def main():
                     #print(f"Received delta from MQTT: {endpose_delta}")
                     #print(f"Calculated New endpose: {current_end_pose}")
 
+                    x, y, z, rx, ry, rz = current_end_pose  # Unpack end-effector pose
+                    
+
+                    # Create the SE3 transformation matrix using RPY angles
+                    Tep_new = SE3.Trans(x, y, z) * SE3.RPY(rx, ry, rz)  # important, you can chose RPY or Euler
+
+                    #rtb.tools.trajectory.ctraj(Tep_old, Tep_new, s=1) #Trajectory planning
+
                     # Calculate inverse kinematics
-                    joint_angles, success, message, elapsed_time = arm_ik.inverse_kinematics(current_end_pose)
+                    joint_angles, success, message, elapsed_time = arm_ik.inverse_kinematics(Tep_new)
 
                     if success:
                         joint_0 = round(joint_angles[0] * FACTOR)
@@ -197,6 +318,7 @@ def main():
     finally:
         mqtt_handler.disconnect()
         piper.DisconnectPort()
+'''
 
 if __name__ == "__main__":
     main()
