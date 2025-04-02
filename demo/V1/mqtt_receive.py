@@ -196,7 +196,7 @@ class RobotArmIK:
             # Solve inverse kinematics using the last successful joint angles as the initial guess
             #sol = self.robot.ik_LM(Tep, q0=[0,0,0,0,0,0], ilimit=500, slimit=200, tol=1e-1, k=0.5)
             #sol = self.robot.ik_LM(Tep, q0=[0,0,0,0,0,0], ilimit=500, slimit=300, tol=1e-2, mask = [1,1,1,100,100,100],joint_limits = 1,k=0.5,method = 'chan')
-            sol = self.robot.ik_LM(Tep, q0=self.last_successful_q, ilimit=500, slimit=300, tol=5e-3, mask = [1,1,1,100,100,100],joint_limits = 1,k=0.5,method = 'chan')
+            sol = self.robot.ik_LM(Tep, q0=self.last_successful_q, ilimit=500, slimit=300, tol=5e-3, mask = [1,1,1,100,100,100],joint_limits = 1,k=0.9,method = 'chan')
             theta = sol[0]  # Joint angles
             success = sol[1]  # Success flag (1 if successful, 0 otherwise)
 
