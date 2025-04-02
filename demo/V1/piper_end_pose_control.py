@@ -59,7 +59,7 @@ def is_data_available():
 FACTOR = 57324.840764  # A constant, keep it uppercase.
 
 # Number of interpolation points
-N_SAMPLES = 5  # Adjust for smoother motion
+N_SAMPLES = 10  # Adjust for smoother motion
 
 # Initial end pose
 INITIAL_END_POSE = [55, 0, 260,0,  np.pi/2, 0]
