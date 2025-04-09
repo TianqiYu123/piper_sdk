@@ -17,6 +17,13 @@ MQTT_PORT = 8003 # Default MQTT port.  If you are using a different port, change
 MQTT_TOPIC = "arm/pose/#"  # MQTT topic you are subscribing to
 MQTT_CLIENT_ID = "endpose_reader" #client ID
 
+FACTOR = 57324.840764  # A constant, keep it uppercase.
+# Number of interpolation points
+N_SAMPLES = 10  # Adjust for smoother motion
+# Initial end pose
+#INITIAL_END_POSE = [55, 0, 260,0,  np.pi/2, 0]
+INITIAL_END_POSE = [150, 0, 260,0,  np.pi/2, 0]
+
 def enable_fun(piper:C_PiperInterface):
     '''
     使能机械臂并检测使能状态,尝试5s,如果使能超时则退出程序
@@ -55,14 +62,6 @@ def enable_fun(piper:C_PiperInterface):
 def is_data_available():
     """Check if there's data waiting to be read from stdin (keyboard)."""
     return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
-
-FACTOR = 57324.840764  # A constant, keep it uppercase.
-
-# Number of interpolation points
-N_SAMPLES = 10  # Adjust for smoother motion
-
-# Initial end pose
-INITIAL_END_POSE = [55, 0, 260,0,  np.pi/2, 0]
 
 def main():
     mqtt_handler = MQTTHandler(MQTT_BROKER, MQTT_PORT, MQTT_TOPIC, MQTT_CLIENT_ID)

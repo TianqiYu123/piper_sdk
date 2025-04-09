@@ -33,6 +33,41 @@ Test:
 
 ### 1.1 安装依赖
 
+#### 1.1.1 建议配置虚拟python环境安装roboticstoolbox
+安装miniconda
+https://www.anaconda.com/docs/getting-started/miniconda/install
+或者mamba（更快速，节约空间，如果使用mamba只需将后面所有conda改成mamba）
+https://github.com/conda-forge/miniforge
+```shell
+curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+```
+or
+```shell
+wget "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+```
+
+```shell
+bash Miniforge3-$(uname)-$(uname -m).sh
+```
+
+conda/mamba环境安装完成后创建新的conda环境
+```shell
+conda create -n robotarm python=3.12
+```
+激活conda环境
+```shell
+conda activate robotarm
+```
+#### 1.1.1 在conda中安装robottoolbox和其他依赖
+```shell
+conda install conda-forge::roboticstoolbox-python
+```
+```shell
+pip3 install paho-mqtt
+mambay install conda-forge::transforms3d
+```
+
+
 注: python-can版本应高于3.3.4
 
 ```shell
@@ -80,6 +115,16 @@ sudo apt update && sudo apt install can-utils ethtool
 ```bash
 bash can_activate.sh can0 1000000
 ```
+使能机械臂
+```bash
+python3 demo/V1/piper_enable.py
+```
+
+VR眼镜控制程序
+```bash
+python3 demo/V1/piper_end_pose_control.py
+```
+注：不同电脑性能不同，可能需要修改 demo/V1/mqtt_receive.py 中 sol = self.robot.ik_LM 逆运动学求解的参数
 
 ##### 2) pc插入多个usb转can模块， 但每次只激活一个can模块
 
