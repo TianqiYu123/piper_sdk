@@ -65,6 +65,9 @@ conda install conda-forge::roboticstoolbox-python
 ```shell
 pip3 install paho-mqtt
 conda install conda-forge::transforms3d
+
+conda install conda-forge::spatialmath-python
+conda install conda-forge::meshcat-python
 ```
 
 
