@@ -181,7 +181,8 @@ def main():
     piper.JointMaxAccConfig(5, acc_limit)
     time.sleep(0.05)
     piper.JointMaxAccConfig(6, acc_limit)
-    time.sleep(0.05) # Add a final delay
+    time.sleep(0.05)
+
     model = pin.buildModelFromUrdf("demo/PICO/piper_description/urdf/piper_description.urdf")
     data = model.createData()
 
@@ -278,8 +279,8 @@ def main():
                         joint_5 = round((joint_angles[5]) * FACTOR) # Joint Angle is not always = 0
                         joint_6 = round((1 - grip) / 5 * 1000 * 1000)
 
-                        piper.SearchAllMotorMaxAccLimit()
-                        print(piper.GetAllMotorMaxAccLimit())
+                        #piper.SearchAllMotorMaxAccLimit()
+                        #print(piper.GetAllMotorMaxAccLimit())
                         piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
                         piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
                         piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
