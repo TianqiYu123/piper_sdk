@@ -293,6 +293,45 @@ def main():
                 grip,
             ) = mqtt_handler.get_righthand()
 
+            if buttonA == 1:
+                print("Button A pressed. Restarting robot arm control...")
+                # Reinitialize the robot arm control
+                mqtt_handler.disconnect()
+                piper.DisconnectPort()
+                mqtt_handler.connect()
+                piper.ConnectPort()
+                piper.EnableArm(7)
+                enable_fun(piper=piper)
+                # Move to initial pose
+                target_joint_angles = np.zeros(NUM_JOINTS)  # Return to zero angles
+
+                # Convert to int and Send Motor signal
+                joint_0 = round(target_joint_angles[0] * FACTOR)
+                joint_1 = round(target_joint_angles[1] * FACTOR)
+                joint_2 = round(target_joint_angles[2] * FACTOR)
+                joint_3 = round(target_joint_angles[3] * FACTOR)
+                joint_4 = round(target_joint_angles[4] * FACTOR)
+                joint_5 = round((target_joint_angles[5]) * FACTOR)  # Joint Angle is not always = 0
+                joint_6 = round(0.2 * 1000 * 1000)
+
+                piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
+                piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
+                piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
+                time.sleep(2)  # Wait for the robot to reach the initial pose
+
+                acc_limit = 270  # Define the acceleration limit
+                piper.JointConfig(joint_num=7, set_zero=0, acc_param_is_effective=0xAE, max_joint_acc=acc_limit, clear_err=0xAE)
+                time.sleep(1)
+
+                current_end_pose = INITIAL_END_POSE[:]
+                old_end_pose = INITIAL_END_POSE[:]
+                calibration_pose = None
+                last_joint_angles = np.zeros(model.nq)
+
+            if buttonB == 1:
+                print("Button B pressed. Disabling robot arm...")
+                piper.DisableArm(7)
+
             if endpose_delta is not None and trigger is not None:
                 try:
                     endpose_delta = [float(x) for x in endpose_delta]
@@ -307,6 +346,27 @@ def main():
                     continue
 
                 if trigger == 0:
+                    if trigger_state == 1:
+                        print("Trigger released. Returning to initial pose...")
+                        target_joint_angles = np.zeros(NUM_JOINTS)  # Return to zero angles
+
+                        # Convert to int and Send Motor signal
+                        joint_0 = round(target_joint_angles[0] * FACTOR)
+                        joint_1 = round(target_joint_angles[1] * FACTOR)
+                        joint_2 = round(target_joint_angles[2] * FACTOR)
+                        joint_3 = round(target_joint_angles[3] * FACTOR)
+                        joint_4 = round(target_joint_angles[4] * FACTOR)
+                        joint_5 = round((target_joint_angles[5]) * FACTOR)  # Joint Angle is not always = 0
+                        joint_6 = round(0.2 * 1000 * 1000)
+
+                        piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
+                        piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
+                        piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
+
+                        current_end_pose = INITIAL_END_POSE[:]
+                        old_end_pose = INITIAL_END_POSE[:]
+                        calibration_pose = None
+                    trigger_state = 0
                     if trigger_state == 1:
                         print("Trigger released. Returning to initial pose...")
                         target_joint_angles = np.zeros(NUM_JOINTS)  # Return to zero angles
