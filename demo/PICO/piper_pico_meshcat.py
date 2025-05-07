@@ -206,7 +206,15 @@ def inverse_kinematics(model, data, target_pose, q_init=None):
         return None, False, elapsed_time
 
 
+import subprocess
+
 def main():
+    try:
+        subprocess.run(["bash", "can_activate.sh", "can0", "1000000"], check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error running can_activate.sh: {e}")
+        return
+
     mqtt_handler = MQTTHandler(MQTT_BROKER, MQTT_PORT, MQTT_TOPIC, MQTT_CLIENT_ID)
     mqtt_handler.connect()
     piper = C_PiperInterface("can0")

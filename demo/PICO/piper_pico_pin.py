@@ -12,6 +12,8 @@ from piper_sdk import *
 import pinocchio as pin
 from scipy.optimize import minimize
 import paho.mqtt.client as mqtt
+import os
+from os.path import dirname, join, abspath
 
 MQTT_BROKER = "47.96.170.89"
 MQTT_PORT = 8003
@@ -21,8 +23,9 @@ MQTT_CLIENT_ID = "endpose_reader"
 #FACTOR = 57324.840764
 FACTOR = 57290
 #INITIAL_END_POSE = [150, 0, 260, 0, pi/2, 0]
-INITIAL_END_POSE = [0,0,0,0,pi/2,0]
-NUM_JOINTS = 6 # number of joints you are controlling
+INITIAL_END_POSE = [0, 0, 0, 0, pi / 2, 0]
+NUM_JOINTS = 6  # number of joints you are controlling
+
 
 def enable_fun(piper: C_PiperInterface):
     enable_flag = False
@@ -32,7 +35,12 @@ def enable_fun(piper: C_PiperInterface):
     while not enable_flag:
         elapsed_time = time.time() - start_time
         print("--------------------")
-        enable_flag = all([getattr(piper.GetArmLowSpdInfoMsgs(), f"motor_{i+1}").foc_status.driver_enable_status for i in range(NUM_JOINTS)]) # use NUM_JOINTS
+        enable_flag = all(
+            [
+                getattr(piper.GetArmLowSpdInfoMsgs(), f"motor_{i+1}").foc_status.driver_enable_status
+                for i in range(NUM_JOINTS)
+            ]
+        )  # use NUM_JOINTS
         print("使能状态:", enable_flag)
         piper.EnableArm(7)
         piper.GripperCtrl(0, 1000, 0x01, 0)
@@ -48,28 +56,47 @@ def enable_fun(piper: C_PiperInterface):
         print("程序自动使能超时,退出程序")
         exit(0)
 
+
 def is_data_available():
     return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [], 0)
+
 
 def left_to_right_hand(x_left, y_left, z_left, rx_left, ry_left, rz_left):
     x_right = z_left
     y_right = -x_left
     z_right = y_left
-    r_left = Rotation.from_euler('zyx', [rz_left, ry_left, rx_left])
+    r_left = Rotation.from_euler("zyx", [rz_left, ry_left, rx_left])
     rot_matrix_left = r_left.as_matrix()
     transform_matrix = np.array([[0, 0, 1], [-1, 0, 0], [0, 1, 0]])
     transform_matrix_inv = transform_matrix.T
     rot_matrix_right = transform_matrix @ rot_matrix_left @ transform_matrix_inv
     r_right = Rotation.from_matrix(rot_matrix_right)
-    rz_right, ry_right, rx_right = r_right.as_euler('zyx')
+    rz_right, ry_right, rx_right = r_right.as_euler("zyx")
     return [x_right, y_right, z_right, rx_right, ry_right, rz_right]
+
 
 def process_message(payload):
     try:
         data = json.loads(payload)
         if "info" in data and isinstance(data["info"], list) and len(data["info"]) == 15:
-            x, y, z, qx, qy, qz, qw, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip, temp = data["info"]
-            rx, ry, rz = euler.quat2euler([qw, qx, qy, qz], 'sxyz')
+            (
+                x,
+                y,
+                z,
+                qx,
+                qy,
+                qz,
+                qw,
+                trigger,
+                joystickX,
+                joystickY,
+                joystickClick,
+                buttonA,
+                buttonB,
+                grip,
+                temp,
+            ) = data["info"]
+            rx, ry, rz = euler.quat2euler([qw, qx, qy, qz], "sxyz")
             endpose = left_to_right_hand(x, y, z, rx, ry, rz)
             return endpose, int(trigger), joystickX, joystickY, joystickClick, buttonA, buttonB, grip
         else:
@@ -78,6 +105,7 @@ def process_message(payload):
     except (json.JSONDecodeError, Exception) as e:
         print(f"Error: {e}")
         return None, None, None, None, None, None, None, None
+
 
 class MQTTHandler:
     def __init__(self, broker, port, topic, client_id):
@@ -105,7 +133,9 @@ class MQTTHandler:
             print(f"Failed to connect, return code {rc}")
 
     def on_message(self, client, userdata, msg):
-        endpose, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip = process_message(msg.payload.decode())
+        endpose, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip = process_message(
+            msg.payload.decode()
+        )
         self.endpose = endpose
         self.trigger = trigger
         self.joystickX = joystickX
@@ -127,21 +157,32 @@ class MQTTHandler:
         self.client.disconnect()
 
     def get_righthand(self):
-        return self.endpose, self.trigger, self.joystickX, self.joystickY, self.joystickClick, self.buttonA, self.buttonB, self.grip
+        return (
+            self.endpose,
+            self.trigger,
+            self.joystickX,
+            self.joystickY,
+            self.joystickClick,
+            self.buttonA,
+            self.buttonB,
+            self.grip,
+        )
+
 
 def cost_function(q, model, data, target_pose):
     """Cost function for IK optimization.  Measures the distance between the current end-effector pose and the target pose."""
     pin.forwardKinematics(model, data, q)
     pin.updateFramePlacements(model, data)
-    current_pose = data.oMf[model.getFrameId("gripper_base")].homogeneous #change tool_frame to your frame name.
+    current_pose = data.oMf[model.getFrameId("gripper_base")].homogeneous  # change tool_frame to your frame name.
 
     # Calculate position error
     position_error = np.linalg.norm(current_pose[:3, 3] - target_pose[:3, 3])
 
     # Calculate orientation error (using rotation matrix difference)
     rotation_error = np.linalg.norm(current_pose[:3, :3] - target_pose[:3, :3])
-    #print("Error",position_error + rotation_error)
+    # print("Error",position_error + rotation_error)
     return position_error + rotation_error
+
 
 def inverse_kinematics(model, data, target_pose, q_init=None):
     """Inverse kinematics using optimization."""
@@ -153,14 +194,25 @@ def inverse_kinematics(model, data, target_pose, q_init=None):
 
     start_time = time.time()
 
-    result = minimize(cost_function, q_init, args=(model, data, target_pose), method='SLSQP', bounds=bounds, tol=1e-4) #tol is tolerance
+    result = minimize(
+        cost_function, q_init, args=(model, data, target_pose), method="SLSQP", bounds=bounds, tol=1e-4
+    )  # tol is tolerance
     elapsed_time = time.time() - start_time
     if result.success:
         return result.x, True, elapsed_time
     else:
         return None, False, elapsed_time
 
+
+import subprocess
+
 def main():
+    try:
+        subprocess.run(["bash", "can_activate.sh", "can0", "1000000"], check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error running can_activate.sh: {e}")
+        return
+
     mqtt_handler = MQTTHandler(MQTT_BROKER, MQTT_PORT, MQTT_TOPIC, MQTT_CLIENT_ID)
     mqtt_handler.connect()
     piper = C_PiperInterface("can0")
@@ -168,24 +220,35 @@ def main():
     piper.EnableArm(7)
     enable_fun(piper=piper)
 
-    acc_limit = 250  # Define the acceleration limit
+    # Move to initial pose
+    target_joint_angles = np.zeros(NUM_JOINTS)  # Return to zero angles
 
-    piper.JointMaxAccConfig(1, acc_limit)
-    time.sleep(0.05)
-    piper.JointMaxAccConfig(2, acc_limit)
-    time.sleep(0.05)
-    piper.JointMaxAccConfig(3, acc_limit)
-    time.sleep(0.05)
-    piper.JointMaxAccConfig(4, acc_limit)
-    time.sleep(0.05)
-    piper.JointMaxAccConfig(5, acc_limit)
-    time.sleep(0.05)
-    piper.JointMaxAccConfig(6, acc_limit)
-    time.sleep(0.05)
+    # Convert to int and Send Motor signal
+    joint_0 = round(target_joint_angles[0] * FACTOR)
+    joint_1 = round(target_joint_angles[1] * FACTOR)
+    joint_2 = round(target_joint_angles[2] * FACTOR)
+    joint_3 = round(target_joint_angles[3] * FACTOR)
+    joint_4 = round(target_joint_angles[4] * FACTOR)
+    joint_5 = round((target_joint_angles[5]) * FACTOR)  # Joint Angle is not always = 0
+    joint_6 = round(0.2 * 1000 * 1000)
 
-    model = pin.buildModelFromUrdf("demo/PICO/piper_description/urdf/piper_description.urdf")
+    piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
+    piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
+    piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
+    time.sleep(2)  # Wait for the robot to reach the initial pose
+
+    acc_limit = 270  # Define the acceleration limit
+    piper.JointConfig(joint_num=7, set_zero=0, acc_param_is_effective=0xAE, max_joint_acc=acc_limit, clear_err=0xAE)
+    time.sleep(1)
+
+    # Load the robot model using pinocchio
+    pinocchio_model_dir = join(dirname(dirname(str(abspath(__file__)))), "PICO")  # Adjust path as necessary
+    model_path = pinocchio_model_dir
+    mesh_dir = pinocchio_model_dir
+    urdf_filename = "piper_description.urdf"  # Use your robot's URDF
+    urdf_model_path = join(join(model_path, "piper_description/urdf"), urdf_filename)
+    model, collision_model, visual_model = pin.buildModelsFromUrdf(urdf_model_path, mesh_dir)
     data = model.createData()
-
 
     current_end_pose = INITIAL_END_POSE[:]
     old_end_pose = INITIAL_END_POSE[:]
@@ -198,7 +261,52 @@ def main():
 
     try:
         while True:
-            endpose_delta, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip = mqtt_handler.get_righthand()
+            (
+                endpose_delta,
+                trigger,
+                joystickX,
+                joystickY,
+                joystickClick,
+                buttonA,
+                buttonB,
+                grip,
+            ) = mqtt_handler.get_righthand()
+
+            if buttonA == 1:
+                print("Button A pressed. Restarting robot arm control...")
+                mqtt_handler.disconnect()
+                piper.DisconnectPort()
+                mqtt_handler.connect()
+                piper.ConnectPort()
+                piper.EnableArm(7)
+                enable_fun(piper=piper)
+                target_joint_angles = np.zeros(NUM_JOINTS)  # Return to zero angles
+
+                joint_0 = round(target_joint_angles[0] * FACTOR)
+                joint_1 = round(target_joint_angles[1] * FACTOR)
+                joint_2 = round(target_joint_angles[2] * FACTOR)
+                joint_3 = round(target_joint_angles[3] * FACTOR)
+                joint_4 = round(target_joint_angles[4] * FACTOR)
+                joint_5 = round((target_joint_angles[5]) * FACTOR)  # Joint Angle is not always = 0
+                joint_6 = round(0.2 * 1000 * 1000)
+
+                piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
+                piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
+                piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
+                time.sleep(2)  # Wait for the robot to reach the initial pose
+
+                acc_limit = 270  # Define the acceleration limit
+                piper.JointConfig(joint_num=7, set_zero=0, acc_param_is_effective=0xAE, max_joint_acc=acc_limit, clear_err=0xAE)
+                time.sleep(1)
+
+                current_end_pose = INITIAL_END_POSE[:]
+                old_end_pose = INITIAL_END_POSE[:]
+                calibration_pose = None
+                last_joint_angles = np.zeros(model.nq)
+
+            if buttonB == 1:
+                print("Button B pressed. Disabling robot arm...")
+                piper.DisableArm(7)
 
             if endpose_delta is not None and trigger is not None:
                 try:
@@ -216,15 +324,14 @@ def main():
                 if trigger == 0:
                     if trigger_state == 1:
                         print("Trigger released. Returning to initial pose...")
-                        target_joint_angles = np.zeros(NUM_JOINTS) # Return to zero angles
+                        target_joint_angles = np.zeros(NUM_JOINTS)  # Return to zero angles
 
-                        #Convert to int and Send Motor signal
                         joint_0 = round(target_joint_angles[0] * FACTOR)
                         joint_1 = round(target_joint_angles[1] * FACTOR)
                         joint_2 = round(target_joint_angles[2] * FACTOR)
                         joint_3 = round(target_joint_angles[3] * FACTOR)
                         joint_4 = round(target_joint_angles[4] * FACTOR)
-                        joint_5 = round((target_joint_angles[5]) * FACTOR) # Joint Angle is not always = 0
+                        joint_5 = round((target_joint_angles[5]) * FACTOR)  # Joint Angle is not always = 0
                         joint_6 = round(0.2 * 1000 * 1000)
 
                         piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
@@ -243,12 +350,12 @@ def main():
                         calibration_pose = endpose_delta[:]
                         print("Trigger pressed. Calibrating to current pose as zero point...")
 
-                    delta_x = (endpose_delta[0] - calibration_pose[0]) #* 1000
-                    delta_y = (endpose_delta[1] - calibration_pose[1]) #* 1000
-                    delta_z = (endpose_delta[2] - calibration_pose[2]) #* 1000
-                    delta_rx = (endpose_delta[3] - calibration_pose[3]) #* 1
-                    delta_ry = (endpose_delta[4] - calibration_pose[4]) #* 1
-                    delta_rz = (endpose_delta[5] - calibration_pose[5]) #* 1
+                    delta_x = endpose_delta[0] - calibration_pose[0]  
+                    delta_y = endpose_delta[1] - calibration_pose[1]  
+                    delta_z = endpose_delta[2] - calibration_pose[2]  
+                    delta_rx = endpose_delta[3] - calibration_pose[3]  
+                    delta_ry = endpose_delta[4] - calibration_pose[4]  
+                    delta_rz = endpose_delta[5] - calibration_pose[5]  
 
                     new_end_pose = [
                         INITIAL_END_POSE[0] + delta_x,
@@ -261,27 +368,25 @@ def main():
 
                     current_end_pose = new_end_pose[:]
 
-                    #IK to find the joint angles, send angles to robot directly
                     target_pose = np.eye(4)
-                    target_pose[:3, :3] = Rotation.from_euler('xyz', current_end_pose[3:]).as_matrix()
+                    target_pose[:3, :3] = Rotation.from_euler("xyz", current_end_pose[3:]).as_matrix()
                     target_pose[:3, 3] = current_end_pose[:3]
 
-                    joint_angles, success, elapsed_time = inverse_kinematics(model, data, target_pose, last_joint_angles)
+                    joint_angles, success, elapsed_time = inverse_kinematics(
+                        model, data, target_pose, last_joint_angles
+                    )
                     if success:
                         last_joint_angles = joint_angles
 
-                        #Convert to int and Send Motor signal
                         joint_0 = round(joint_angles[0] * FACTOR)
                         joint_1 = round(joint_angles[1] * FACTOR)
                         joint_2 = round(joint_angles[2] * FACTOR)
                         joint_3 = round(joint_angles[3] * FACTOR)
                         joint_4 = round(joint_angles[4] * FACTOR)
-                        joint_5 = round((joint_angles[5]) * FACTOR) # Joint Angle is not always = 0
+                        joint_5 = round((joint_angles[5]) * FACTOR)  # Joint Angle is not always = 0
                         joint_6 = round((1 - grip) / 5 * 1000 * 1000)
 
-                        #piper.SearchAllMotorMaxAccLimit()
-                        #print(piper.GetAllMotorMaxAccLimit())
-                        piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
+                        piper.MotionCtrl_2(0x01, 0x01, 90, 0x00)
                         piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
                         piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
 
@@ -289,11 +394,14 @@ def main():
                         print(f"IK Failed")
                     old_end_pose = current_end_pose[:]
 
+            time.sleep(0.01) # Add a small delay to avoid excessive CPU usage
+
     except KeyboardInterrupt:
         print("Exiting...")
     finally:
         mqtt_handler.disconnect()
         piper.DisconnectPort()
+
 
 if __name__ == "__main__":
     main()
