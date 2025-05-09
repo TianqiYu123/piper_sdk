@@ -8,6 +8,20 @@
 |![ubuntu20.04](https://img.shields.io/badge/Ubuntu-20.04-orange.svg)|![Pass](https://img.shields.io/badge/Pass-blue.svg)|
 |![ubuntu22.04](https://img.shields.io/badge/Ubuntu-22.04-orange.svg)|![Pass](https://img.shields.io/badge/Pass-blue.svg)|
 
+quickstart:
+使用mqtt控制机械臂的demo在demo/PICO 文件夹中
+pico_receive.py 用于接受mqtt信号并转为机械臂的输入信号，主要用于PICO遥操作机械臂
+piper_pico.py 为机械臂PICO遥操作代码
+piper_pico_meshcat.py 在piper_pico.py基础上增加网页端机械臂可视化
+
+send_mqtt_message.py   用键盘模拟网页端输入，发送mqtt控制信号，注意此信号对应piper_web.py(欧拉角), 不使用于piper_pico.py(四元数)
+piper_web.py           web端mqtt信号控制机械臂
+
+mqtt信号格式
+
+{"info": [0.01, 1.54, 0.01, 0.0,  0.0,   0.0, 0.0,  1.0, 0.0, 0.0, 0, 0, 0, 0, 0.0]}
+{"info": [x,    y,    z,    roll, pitch, yaw, 0.0, grip, 0.0, 0.0, 0, 0, 0, 0, 0.0]}
+
 Test:
 
 |PYTHON |STATE|
@@ -28,6 +42,7 @@ Test:
 |双臂的主从配置和读取数据|[double_piper](./asserts/double_piper.MD)|
 |使用pyQT5的开源UI|[Piper_sdk_ui](<https://github.com/agilexrobotics/Piper_sdk_ui.git>)|
 |Q&A|[Q&A](./asserts/Q&A.MD)|
+
 
 ## 1 软件安装方法
 
@@ -58,15 +73,16 @@ conda create -n robotarm python=3.12
 ```shell
 conda activate robotarm
 ```
-#### 1.1.1 在conda中安装robottoolbox和其他依赖
+#### 1.1.1 在conda中安装其他依赖
 ```shell
-conda install conda-forge::roboticstoolbox-python
-```
-```shell
+conda install pinocchio -c conda-forge
+
 pip3 install paho-mqtt
+
 conda install conda-forge::transforms3d
 
 conda install conda-forge::spatialmath-python
+
 conda install conda-forge::meshcat-python
 ```
 
