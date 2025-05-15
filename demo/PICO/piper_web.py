@@ -14,6 +14,7 @@ from scipy.optimize import minimize
 import paho.mqtt.client as mqtt
 import os
 from os.path import dirname, join, abspath
+import random  # Import the random module
 
 # from pinocchio.visualize import MeshcatVisualizer  # Remove Meshcat dependency
 
@@ -33,7 +34,7 @@ X_LIMIT = [0.0, 0.3]
 Y_LIMIT = [-0.15, 0.15]
 Z_LIMIT = [0.1, 0.6]
 RX_LIMIT = [-pi / 2, pi / 2]
-RY_LIMIT = [pi / 2 - 0.1, pi / 2 + 0.1] #RY set limit
+RY_LIMIT = [pi / 2 - 0.1, pi / 2 + 0.1]  # RY set limit
 RZ_LIMIT = [-pi / 2, pi / 2]
 
 
@@ -272,6 +273,10 @@ def main():
     old_end_pose = INITIAL_END_POSE[:]
     last_joint_angles = np.zeros(model.nq)
 
+    # Define the maximum random delta for each component of the end pose
+    MAX_DELTA_POSITION = 0.001  # Adjust as needed (e.g., 1mm)
+    MAX_DELTA_ORIENTATION = 0.001  # Adjust as needed (e.g., 0.1 degrees in radians)
+
     try:
         while True:
             (
@@ -303,6 +308,18 @@ def main():
                 # Accumulate the delta values to the current end pose
                 new_end_pose = [current_end_pose[i] + endpose_delta[i] for i in range(6)]
 
+                # Add a small random delta to each component of the new end pose
+                random_delta = [
+                    random.uniform(-MAX_DELTA_POSITION, MAX_DELTA_POSITION),  # x
+                    random.uniform(-MAX_DELTA_POSITION, MAX_DELTA_POSITION),  # y
+                    random.uniform(-MAX_DELTA_POSITION, MAX_DELTA_POSITION),  # z
+                    random.uniform(-MAX_DELTA_ORIENTATION, MAX_DELTA_ORIENTATION),  # rx
+                    random.uniform(-MAX_DELTA_ORIENTATION, MAX_DELTA_ORIENTATION),  # ry
+                    random.uniform(-MAX_DELTA_ORIENTATION, MAX_DELTA_ORIENTATION),  # rz
+                ]
+                new_end_pose = [new_end_pose[i] + random_delta[i] for i in range(6)]
+
+
                 # Apply limits to the new end pose
                 new_end_pose[0] = clamp(new_end_pose[0], X_LIMIT)
                 new_end_pose[1] = clamp(new_end_pose[1], Y_LIMIT)
@@ -312,7 +329,7 @@ def main():
                 new_end_pose[5] = clamp(new_end_pose[5], RZ_LIMIT)
 
                 current_end_pose = new_end_pose[:]
-                
+
                 # IK to find the joint angles, send angles to robot directly
                 target_pose = np.eye(4)
                 target_pose[:3, :3] = Rotation.from_euler("xyz", current_end_pose[3:]).as_matrix()
