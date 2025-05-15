@@ -145,6 +145,9 @@ python3 demo/V1/piper_end_pose_control.py
 ```
 注：不同电脑性能不同，可能需要修改 demo/V1/mqtt_receive.py 中 sol = self.robot.ik_LM 逆运动学求解的参数
 
+
+sudo /home/tq/miniforge3/envs/robotarm/bin/python demo/PICO/send_mqtt_message.py
+
 ##### 2) pc插入多个usb转can模块， 但每次只激活一个can模块
 
 注： 此处用于同时使用机械臂和底盘的的情况

@@ -15,7 +15,7 @@ import paho.mqtt.client as mqtt
 import os
 from os.path import dirname, join, abspath
 
-from pinocchio.visualize import MeshcatVisualizer
+# from pinocchio.visualize import MeshcatVisualizer  # Remove Meshcat dependency
 
 MQTT_BROKER = "47.96.170.89"
 MQTT_PORT = 8003
@@ -169,7 +169,8 @@ def cost_function(q, model, data, target_pose):
     # Calculate orientation error (using rotation matrix difference)
     rotation_error = np.linalg.norm(current_pose[:3, :3] - target_pose[:3, :3])
     # print("Error",position_error + rotation_error)
-    return position_error + rotation_error*0.15
+    return position_error + rotation_error * 0.1
+
 
 
 def inverse_kinematics(model, data, target_pose, q_init=None):
@@ -210,22 +211,22 @@ def main():
     piper.EnableArm(7)
     enable_fun(piper=piper)
 
-    # Move to initial pose
-    target_joint_angles = np.zeros(NUM_JOINTS)  # Return to zero angles
+    # Move to initial pose - Removed, since we directly command end pose
+    # target_joint_angles = np.zeros(NUM_JOINTS)  # Return to zero angles
 
-    # Convert to int and Send Motor signal
-    joint_0 = round(target_joint_angles[0] * FACTOR)
-    joint_1 = round(target_joint_angles[1] * FACTOR)
-    joint_2 = round(target_joint_angles[2] * FACTOR)
-    joint_3 = round(target_joint_angles[3] * FACTOR)
-    joint_4 = round(target_joint_angles[4] * FACTOR)
-    joint_5 = round((target_joint_angles[5]) * FACTOR)  # Joint Angle is not always = 0
-    joint_6 = round(0.2 * 1000 * 1000)
+    # # Convert to int and Send Motor signal - Removed, since we directly command end pose
+    # joint_0 = round(target_joint_angles[0] * FACTOR)
+    # joint_1 = round(target_joint_angles[1] * FACTOR)
+    # joint_2 = round(target_joint_angles[2] * FACTOR)
+    # joint_3 = round(target_joint_angles[3] * FACTOR)
+    # joint_4 = round(target_joint_angles[4] * FACTOR)
+    # joint_5 = round((target_joint_angles[5]) * FACTOR)  # Joint Angle is not always = 0
+    # joint_6 = round(0.2 * 1000 * 1000)
 
-    piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
-    piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
-    piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
-    time.sleep(2)  # Wait for the robot to reach the initial pose
+    # piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
+    # piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
+    # piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
+    # time.sleep(2)  # Wait for the robot to reach the initial pose
 
     #acc_limit = 270  # Define the acceleration limit
     acc_limit = 500
@@ -245,14 +246,14 @@ def main():
     data = model.createData()
 
     # Initialize the Meshcat visualizer
-    viz = MeshcatVisualizer(model, collision_model, visual_model)
-    try:
-        viz.initViewer(open=True)
-    except ImportError as err:
-        print("Error while initializing the viewer. It seems you should install Python meshcat")
-        print(err)
-        sys.exit(0)
-    viz.loadViewerModel()
+    # viz = MeshcatVisualizer(model, collision_model, visual_model) #comment meshcat
+    # try:
+    #     viz.initViewer(open=True)
+    # except ImportError as err:
+    #     print("Error while initializing the viewer. It seems you should install Python meshcat")
+    #     print(err)
+    #     sys.exit(0)
+    # viz.loadViewerModel()
 
     current_end_pose = INITIAL_END_POSE[:]
     old_end_pose = INITIAL_END_POSE[:]
@@ -315,10 +316,10 @@ def main():
                     joint_3 = round(joint_angles[3] * FACTOR)
                     joint_4 = round(joint_angles[4] * FACTOR)
                     joint_5 = round((joint_angles[5]) * FACTOR)  # Joint Angle is not always = 0
-                    joint_6 = round((1 - trigger) / 5 * 1000 * 1000)
+                    joint_6 = round((1 - grip) / 5 * 1000 * 1000)  # Grip control
 
                     # Visualize the robot in Meshcat
-                    viz.display(joint_angles)
+                    # viz.display(joint_angles)  # Comment meshcat
 
                     # piper.SearchAllMotorMaxAccLimit()
                     # print(piper.GetAllMotorMaxAccLimit())

@@ -14,6 +14,7 @@ from scipy.optimize import minimize
 import paho.mqtt.client as mqtt
 import os
 from os.path import dirname, join, abspath
+import subprocess
 
 from pinocchio.visualize import MeshcatVisualizer
 
@@ -25,9 +26,9 @@ MQTT_CLIENT_ID = "endpose_reader"
 #FACTOR = 57324.840764
 FACTOR = 57290
 #INITIAL_END_POSE = [150, 0, 260, 0, pi/2, 0]
-INITIAL_END_POSE = [0, 0, 0, 0, pi / 2, 0]
+#INITIAL_END_POSE = [0, 0, 0, 0, pi / 2, 0]
+INITIAL_END_POSE = [0.2, 0, 0.18, 0, pi / 2, 0]
 NUM_JOINTS = 6  # number of joints you are controlling
-
 
 def enable_fun(piper: C_PiperInterface):
     enable_flag = False
@@ -99,6 +100,8 @@ def process_message(payload):
                 temp,
             ) = data["info"]
             rx, ry, rz = euler.quat2euler([qw, qx, qy, qz], "sxyz")
+            rz = 0 #limit rotation
+            rx = 0 #limit rotation
             endpose = left_to_right_hand(x, y, z, rx, ry, rz)
             return endpose, int(trigger), joystickX, joystickY, joystickClick, buttonA, buttonB, grip
         else:
@@ -173,7 +176,16 @@ class MQTTHandler:
 
 def cost_function(q, model, data, target_pose):
     """Cost function for IK optimization.  Measures the distance between the current end-effector pose and the target pose."""
-    pin.forwardKinematics(model, data, q)
+    # Create the full joint angle vector, setting the fixed joints to 0
+    q_full = np.zeros(model.nq)
+    q_full[0] = q[0]  # Joint 0
+    q_full[1] = q[1]  # Joint 1
+    q_full[2] = q[2]  # Joint 2
+    q_full[3] = 0  # Joint 3 is fixed at 0
+    q_full[4] = q[3]  # Joint 4
+    q_full[5] = 0  # Joint 5 is fixed at 0
+
+    pin.forwardKinematics(model, data, q_full)
     pin.updateFramePlacements(model, data)
     current_pose = data.oMf[model.getFrameId("gripper_base")].homogeneous  # change tool_frame to your frame name.
 
@@ -183,16 +195,17 @@ def cost_function(q, model, data, target_pose):
     # Calculate orientation error (using rotation matrix difference)
     rotation_error = np.linalg.norm(current_pose[:3, :3] - target_pose[:3, :3])
     # print("Error",position_error + rotation_error)
-    return position_error + rotation_error
+    #return position_error + rotation_error*0.12
+    return position_error + rotation_error*0.2
 
 
 def inverse_kinematics(model, data, target_pose, q_init=None):
     """Inverse kinematics using optimization."""
     if q_init is None:
-        q_init = np.zeros(model.nq)  # Initial guess for joint angles
+        q_init = np.zeros(4)  # Initial guess for joint angles, now just 4 joints.
 
     # Optimization bounds (joint limits) - Optional, but highly recommended
-    bounds = [(model.lowerPositionLimit[i], model.upperPositionLimit[i]) for i in range(model.nq)]
+    bounds = [(model.lowerPositionLimit[i], model.upperPositionLimit[i]) for i in [0, 1, 2, 4]]  # Only bounds for active joints
 
     start_time = time.time()
 
@@ -237,26 +250,12 @@ def main():
     piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
     piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
     piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
-    time.sleep(2)  # Wait for the robot to reach the initial pose
+    time.sleep(0.5)  # Wait for the robot to reach the initial pose
 
-    acc_limit = 270  # Define the acceleration limit
+    #acc_limit = 270  # Define the acceleration limit
+    acc_limit = 500  # Define the acceleration limit
     piper.JointConfig(joint_num=7, set_zero=0, acc_param_is_effective=0xAE, max_joint_acc=acc_limit, clear_err=0xAE)
-    time.sleep(1)
-
-    '''
-    piper.JointMaxAccConfig(1, acc_limit)
-    time.sleep(0.05)
-    piper.JointMaxAccConfig(2, acc_limit)
-    time.sleep(0.05)
-    piper.JointMaxAccConfig(3, acc_limit)
-    time.sleep(0.05)
-    piper.JointMaxAccConfig(4, acc_limit)
-    time.sleep(0.05)
-    piper.JointMaxAccConfig(5, acc_limit)
-    time.sleep(0.05)
-    piper.JointMaxAccConfig(6, acc_limit)
-    time.sleep(0.05)
-    '''
+    time.sleep(0.5)
 
     # Load the robot model using pinocchio
     pinocchio_model_dir = join(dirname(dirname(str(abspath(__file__)))), "PICO")  # Adjust path as necessary
@@ -282,7 +281,8 @@ def main():
     current_end_pose = INITIAL_END_POSE[:]
     old_end_pose = INITIAL_END_POSE[:]
     calibration_pose = None
-    last_joint_angles = np.zeros(model.nq)
+    # last_joint_angles = np.zeros(model.nq)  # Changed to reflect 4 active joints
+    last_joint_angles = np.zeros(4)  # Changed to reflect 4 active joints
 
     trigger_state = 0
 
@@ -327,14 +327,16 @@ def main():
                 piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
                 time.sleep(2)  # Wait for the robot to reach the initial pose
 
-                acc_limit = 270  # Define the acceleration limit
+                #acc_limit = 270  # Define the acceleration limit
+                acc_limit = 500
                 piper.JointConfig(joint_num=7, set_zero=0, acc_param_is_effective=0xAE, max_joint_acc=acc_limit, clear_err=0xAE)
                 time.sleep(1)
 
                 current_end_pose = INITIAL_END_POSE[:]
                 old_end_pose = INITIAL_END_POSE[:]
                 calibration_pose = None
-                last_joint_angles = np.zeros(model.nq)
+                # last_joint_angles = np.zeros(model.nq) # Reset to 4
+                last_joint_angles = np.zeros(4)
 
             if buttonB == 1:
                 print("Button B pressed. Disabling robot arm...")
@@ -356,18 +358,18 @@ def main():
                 if trigger == 0:
                     if trigger_state == 1:
                         print("Trigger released. Returning to initial pose...")
-                        target_joint_angles = np.zeros(NUM_JOINTS)  # Return to zero angles
-
+                        #target_joint_angles = np.zeros(NUM_JOINTS)  # Return to zero angles
+                        target_joint_angles = [0.0, 0.992, -0.40, 0.0, -0.50, 0.0]
                         # Convert to int and Send Motor signal
                         joint_0 = round(target_joint_angles[0] * FACTOR)
                         joint_1 = round(target_joint_angles[1] * FACTOR)
                         joint_2 = round(target_joint_angles[2] * FACTOR)
-                        joint_3 = round(target_joint_angles[3] * FACTOR)
+                        joint_3 = round(target_joint_angles[3] * FACTOR)  # Force to 0
                         joint_4 = round(target_joint_angles[4] * FACTOR)
-                        joint_5 = round((target_joint_angles[5]) * FACTOR)  # Joint Angle is not always = 0
+                        joint_5 = round((target_joint_angles[5]) * FACTOR)  # Force to 0
                         joint_6 = round(0.2 * 1000 * 1000)
 
-                        piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
+                        piper.MotionCtrl_2(0x01, 0x01, 95, 0x00)
                         piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
                         piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
 
@@ -377,15 +379,15 @@ def main():
                     trigger_state = 0
                     if trigger_state == 1:
                         print("Trigger released. Returning to initial pose...")
-                        target_joint_angles = np.zeros(NUM_JOINTS)  # Return to zero angles
-
+                        #target_joint_angles = np.zeros(NUM_JOINTS)  # Return to zero angles
+                        target_joint_angles = [0.0, 0.992, -0.40, 0.0, -0.50, 0.0]
                         # Convert to int and Send Motor signal
                         joint_0 = round(target_joint_angles[0] * FACTOR)
                         joint_1 = round(target_joint_angles[1] * FACTOR)
                         joint_2 = round(target_joint_angles[2] * FACTOR)
-                        joint_3 = round(target_joint_angles[3] * FACTOR)
+                        joint_3 = round(target_joint_angles[3] * FACTOR) # Force to 0
                         joint_4 = round(target_joint_angles[4] * FACTOR)
-                        joint_5 = round((target_joint_angles[5]) * FACTOR)  # Joint Angle is not always = 0
+                        joint_5 = round((target_joint_angles[5]) * FACTOR)  # Force to 0
                         joint_6 = round(0.2 * 1000 * 1000)
 
                         piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
@@ -410,7 +412,10 @@ def main():
                     delta_rx = endpose_delta[3] - calibration_pose[3]  # * 1
                     delta_ry = endpose_delta[4] - calibration_pose[4]  # * 1
                     delta_rz = endpose_delta[5] - calibration_pose[5]  # * 1
-
+                    #print(delta_x,delta_y,delta_z)
+                
+                    if delta_z < -0.1:
+                        delta_z = -0.1
                     new_end_pose = [
                         INITIAL_END_POSE[0] + delta_x,
                         INITIAL_END_POSE[1] + delta_y,
@@ -427,6 +432,7 @@ def main():
                     target_pose[:3, :3] = Rotation.from_euler("xyz", current_end_pose[3:]).as_matrix()
                     target_pose[:3, 3] = current_end_pose[:3]
 
+                    # IK to find the joint angles, send angles to robot directly
                     joint_angles, success, elapsed_time = inverse_kinematics(
                         model, data, target_pose, last_joint_angles
                     )
@@ -437,13 +443,22 @@ def main():
                         joint_0 = round(joint_angles[0] * FACTOR)
                         joint_1 = round(joint_angles[1] * FACTOR)
                         joint_2 = round(joint_angles[2] * FACTOR)
-                        joint_3 = round(joint_angles[3] * FACTOR)
-                        joint_4 = round(joint_angles[4] * FACTOR)
-                        joint_5 = round((joint_angles[5]) * FACTOR)  # Joint Angle is not always = 0
+                        joint_3 = round(0 * FACTOR) # Fixed Joint 3
+                        joint_4 = round(joint_angles[3] * FACTOR) # Joint 4 from result.x (remember, q_init is now 4 elements)
+                        joint_5 = round(0 * FACTOR) # Fixed Joint 5
                         joint_6 = round((1 - grip) / 5 * 1000 * 1000)
 
                         # Visualize the robot in Meshcat
-                        viz.display(joint_angles)
+                        # Create a full joint angle vector for visualization
+                        joint_angles_full = np.zeros(model.nq)
+                        joint_angles_full[0] = joint_angles[0]
+                        joint_angles_full[1] = joint_angles[1]
+                        joint_angles_full[2] = joint_angles[2]
+                        joint_angles_full[3] = 0  # Fixed
+                        joint_angles_full[4] = joint_angles[3]
+                        joint_angles_full[5] = 0  # Fixed
+                        print(joint_angles_full)
+                        viz.display(joint_angles_full)
 
                         # piper.SearchAllMotorMaxAccLimit()
                         # print(piper.GetAllMotorMaxAccLimit())
