@@ -35,7 +35,7 @@ Y_LIMIT = [-0.15, 0.15]
 Z_LIMIT = [0.1, 0.6]
 RX_LIMIT = [-pi / 2, pi / 2]
 RY_LIMIT = [pi / 2 - 0.1, pi / 2 + 0.1]  # RY set limit
-RZ_LIMIT = [-pi / 2, pi / 2]
+RZ_LIMIT = [-pi, pi]
 
 
 def enable_fun(piper: C_PiperInterface):
