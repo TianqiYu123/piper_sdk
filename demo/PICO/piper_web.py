@@ -25,8 +25,16 @@ MQTT_CLIENT_ID = "endpose_reader"
 # FACTOR = 57324.840764
 FACTOR = 57290
 # INITIAL_END_POSE = [150, 0, 260, 0, pi/2, 0]
-INITIAL_END_POSE = [0, 0, 0, 0, pi / 2, 0]
+INITIAL_END_POSE = [0.1, 0, 0.1, 0, pi / 2, 0]
 NUM_JOINTS = 6  # number of joints you are controlling
+
+# Define limits for the end effector pose (adjust as needed)
+X_LIMIT = [0.0, 0.3]
+Y_LIMIT = [-0.15, 0.15]
+Z_LIMIT = [0.1, 0.6]
+RX_LIMIT = [-pi / 2, pi / 2]
+RY_LIMIT = [pi / 2 - 0.1, pi / 2 + 0.1] #RY set limit
+RZ_LIMIT = [-pi / 2, pi / 2]
 
 
 def enable_fun(piper: C_PiperInterface):
@@ -85,8 +93,8 @@ def process_message(payload):
                 temp,
             ) = data["info"]
             # rx, ry, rz = euler.quat2euler([qw, qx, qy, qz], "sxyz") # NO NEED TO CALCULATE EULER
-            endpose = [x, y, z, rx, ry, rz]  # DIRECTLY ASSIGN THE FIRST 6 ELEMENTS
-            return endpose, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip #HARDCODE TRIGGER TO 0
+            endpose_delta = [x, y, z, rx, ry, rz]  # DIRECTLY ASSIGN THE FIRST 6 ELEMENTS
+            return endpose_delta, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip
         else:
             print("Invalid data format")
             return None, None, None, None, None, None, None, None
@@ -104,7 +112,7 @@ class MQTTHandler:
         self.client = mqtt.Client(client_id=self.client_id)
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
-        self.endpose = None
+        self.endpose_delta = None
         self.trigger = None
         self.joystickX = None
         self.joystickY = None
@@ -112,6 +120,7 @@ class MQTTHandler:
         self.buttonA = None
         self.buttonB = None
         self.grip = None
+        self.message_received = False  # Flag to track if a message has been processed
 
     def on_connect(self, client, userdata, flags, rc):
         if rc == 0:
@@ -121,10 +130,10 @@ class MQTTHandler:
             print(f"Failed to connect, return code {rc}")
 
     def on_message(self, client, userdata, msg):
-        endpose, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip = process_message(
+        endpose_delta, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip = process_message(
             msg.payload.decode()
         )
-        self.endpose = endpose
+        self.endpose_delta = endpose_delta
         self.trigger = trigger
         self.joystickX = joystickX
         self.joystickY = joystickY
@@ -132,6 +141,7 @@ class MQTTHandler:
         self.buttonA = buttonA
         self.buttonB = buttonB
         self.grip = grip
+        self.message_received = True  # Set the flag when a message is received
 
     def connect(self):
         try:
@@ -146,7 +156,7 @@ class MQTTHandler:
 
     def get_righthand(self):
         return (
-            self.endpose,
+            self.endpose_delta,
             self.trigger,
             self.joystickX,
             self.joystickY,
@@ -172,7 +182,6 @@ def cost_function(q, model, data, target_pose):
     return position_error + rotation_error * 0.1
 
 
-
 def inverse_kinematics(model, data, target_pose, q_init=None):
     """Inverse kinematics using optimization."""
     if q_init is None:
@@ -185,7 +194,7 @@ def inverse_kinematics(model, data, target_pose, q_init=None):
 
     # result = minimize(cost_function, q_init, args=(model, data, target_pose), method="SLSQP", bounds=bounds, tol=1e-4)  # tol is tolerance
     result = minimize(cost_function, q_init, args=(model, data, target_pose), method="SLSQP", bounds=bounds,
-                      tol=1e-2)  # tol is tolerance
+                      tol=1e-4)  # tol is tolerance
 
     elapsed_time = time.time() - start_time
     if result.success:
@@ -196,6 +205,10 @@ def inverse_kinematics(model, data, target_pose, q_init=None):
 
 import subprocess
 
+def clamp(value, limits):
+    """Clamp a value within the given limits."""
+    lower, upper = limits
+    return max(lower, min(value, upper))
 
 def main():
     try:
@@ -229,7 +242,7 @@ def main():
     # time.sleep(2)  # Wait for the robot to reach the initial pose
 
     #acc_limit = 270  # Define the acceleration limit
-    acc_limit = 500
+    acc_limit = 200
     piper.JointConfig(joint_num=7, set_zero=0, acc_param_is_effective=0xAE, max_joint_acc=acc_limit, clear_err=0xAE)
     time.sleep(1)
 
@@ -274,7 +287,8 @@ def main():
 
             # REMOVED BUTTON A AND BUTTON B CONTROL
 
-            if endpose_delta is not None:
+            if mqtt_handler.message_received and endpose_delta is not None: # Only process if a message was received and processed
+                mqtt_handler.message_received = False # reset flag after processing
                 try:
                     endpose_delta = [float(x) for x in endpose_delta]
 
@@ -286,11 +300,19 @@ def main():
                     print(f"Error unpacking MQTT: {e}")
                     continue
 
-                # Directly use the endpose_delta values
-                new_end_pose = endpose_delta[:]  # Use the direct pose
+                # Accumulate the delta values to the current end pose
+                new_end_pose = [current_end_pose[i] + endpose_delta[i] for i in range(6)]
+
+                # Apply limits to the new end pose
+                new_end_pose[0] = clamp(new_end_pose[0], X_LIMIT)
+                new_end_pose[1] = clamp(new_end_pose[1], Y_LIMIT)
+                new_end_pose[2] = clamp(new_end_pose[2], Z_LIMIT)
+                new_end_pose[3] = clamp(new_end_pose[3], RX_LIMIT)
+                new_end_pose[4] = clamp(new_end_pose[4], RY_LIMIT)
+                new_end_pose[5] = clamp(new_end_pose[5], RZ_LIMIT)
 
                 current_end_pose = new_end_pose[:]
-
+                
                 # IK to find the joint angles, send angles to robot directly
                 target_pose = np.eye(4)
                 target_pose[:3, :3] = Rotation.from_euler("xyz", current_end_pose[3:]).as_matrix()
@@ -323,7 +345,7 @@ def main():
 
                     # piper.SearchAllMotorMaxAccLimit()
                     # print(piper.GetAllMotorMaxAccLimit())
-                    piper.MotionCtrl_2(0x01, 0x01, 90, 0x00)
+                    piper.MotionCtrl_2(0x01, 0x01, 50, 0x00)
                     piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
                     piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
 
