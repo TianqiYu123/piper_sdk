@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+     #!/usr/bin/env python3
 # -*-coding:utf8-*-
 import numpy as np
 from math import pi
@@ -16,6 +16,7 @@ import os
 from os.path import dirname, join, abspath
 import subprocess
 import random  # Import the random module
+import threading  # Import the threading module
 
 from pinocchio.visualize import MeshcatVisualizer
 
@@ -118,13 +119,15 @@ def process_message_pico(payload):
             ) = data["info"]
             rx, ry, rz = euler.quat2euler([qw, qx, qy, qz], "sxyz")
             endpose = left_to_right_hand(x, y, z, rx, ry, rz)
-            return endpose, int(trigger), joystickX, joystickY, joystickClick, buttonA, buttonB, grip
+            return endpose, int(trigger), joystickX, joystickY, joystickClick, buttonA, buttonB, grip, int(
+                temp
+            )  # Return temp
         else:
             print("Invalid data format from PICO")
-            return None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None
     except (json.JSONDecodeError, Exception) as e:
         print(f"Error processing PICO message: {e}")
-        return None, None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None
 
 
 def process_message_web(payload):
@@ -150,13 +153,15 @@ def process_message_web(payload):
                 temp,
             ) = data["info"]
             endpose_delta = [x, y, z, rx, ry, rz]  # DIRECTLY ASSIGN THE FIRST 6 ELEMENTS
-            return endpose_delta, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip
+            return endpose_delta, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip, int(
+                temp
+            )  # Return temp
         else:
             print("Invalid data format from WEB")
-            return None, None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None, None
     except (json.JSONDecodeError, Exception) as e:
         print(f"Error processing WEB message: {e}")
-        return None, None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None, None
 
 
 class MQTTHandler:
@@ -176,9 +181,13 @@ class MQTTHandler:
         self.buttonA = None
         self.buttonB = None
         self.grip = None
-        self.control_mode = "pico"  # Initial control mode: "pico" or "web"
-        self.current_topic = MQTT_TOPIC_PICO  # Start listening to PICO topic
+        self.temp = None  # Store the 'temp' value
+        self.control_mode = "web"  # Initial control mode: "pico" or "web"
+        self.current_topic = MQTT_TOPIC_WEB  # Start listening to PICO topic
+        self._lock = threading.Lock()  # Initialize the lock
         self.message_available = False  # Flag to indicate if a message is available
+        self.publish_interval = 0.03  # 30 Hz publish interval
+        self.last_publish_time = 0
 
     def on_connect(self, client, userdata, flags, rc):
         if rc == 0:
@@ -188,39 +197,54 @@ class MQTTHandler:
             print(f"Failed to connect, return code {rc}")
 
     def on_message(self, client, userdata, msg):
-        if self.control_mode == "pico":
-            endpose, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip = process_message_pico(
-                msg.payload.decode()
-            )
-            self.endpose = endpose
-            self.endpose_delta = None
-            self.trigger = trigger
-            self.joystickX = joystickX
-            self.joystickY = joystickY
-            self.joystickClick = joystickClick
-            self.buttonA = buttonA
-            self.buttonB = buttonB
-            self.grip = grip
+        try:  # Add a try-except block to catch any errors during message processing
+            #payload = msg.payload.decode()
+            #print(f"Received MQTT message on topic {msg.topic}: {payload}")
+            if self.control_mode == "pico":
+                endpose, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip, temp = (
+                    process_message_pico(msg.payload.decode())
+                )
+                with self._lock:
+                    self.endpose = endpose
+                    self.endpose_delta = None
+                    self.trigger = trigger
+                    self.joystickX = joystickX
+                    self.joystickY = joystickY
+                    self.joystickClick = joystickClick
+                    self.buttonA = buttonA
+                    self.buttonB = buttonB
+                    self.grip = grip
+                    self.temp = temp  # Store the temp value
+                    self.message_available = True  # Set the flag when a message is received
 
-        elif self.control_mode == "web":
-            endpose_delta, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip = process_message_web(
-                msg.payload.decode()
-            )
-            self.endpose = None
-            self.endpose_delta = endpose_delta
-            self.trigger = trigger
-            self.joystickX = joystickX
-            self.joystickY = joystickY
-            self.joystickClick = joystickClick
-            self.buttonA = buttonA
-            self.buttonB = buttonB
-            self.grip = grip
-        self.message_available = True  # Set the flag when a message is received
+            elif self.control_mode == "web":
+                endpose_delta, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip, temp = (
+                    process_message_web(msg.payload.decode())
+                )
+                with self._lock:
+                    self.endpose = None
+                    self.endpose_delta = endpose_delta
+                    self.trigger = trigger
+                    self.joystickX = joystickX
+                    self.joystickY = joystickY
+                    self.joystickClick = joystickClick
+                    self.buttonA = buttonA
+                    self.buttonB = buttonB
+                    self.grip = grip
+                    self.temp = temp  # Store the temp value
+                    self.message_available = True  # Set the flag when a message is received
+
+            else:
+                print("Unknown control mode in on_message.")  # Add a log message for debugging
+
+        except Exception as e:
+            print(f"Error processing message in on_message: {e}")  # Add logging for any errors
 
     def connect(self):
         try:
             self.client.connect(self.broker, self.port, 60)
-            self.client.loop_start()
+            self.client.loop_start()  # Use loop_start for non-blocking operation
+            # self.client.loop_forever() # Can also use loop_forever if you don't need main thread for other things
         except Exception as e:
             print(f"Connection error: {e}")
 
@@ -235,16 +259,18 @@ class MQTTHandler:
         self.client.subscribe(self.current_topic)
         print(f"Subscribed to topic: {topic}")
         # Reset stored data when switching topics
-        self.endpose = None
-        self.endpose_delta = None
-        self.trigger = None
-        self.joystickX = None
-        self.joystickY = None
-        self.joystickClick = None
-        self.buttonA = None
-        self.buttonB = None
-        self.grip = None
-        self.message_available = False
+        with self._lock:
+            self.endpose = None
+            self.endpose_delta = None
+            self.trigger = None
+            self.joystickX = None
+            self.joystickY = None
+            self.joystickClick = None
+            self.buttonA = None
+            self.buttonB = None
+            self.grip = None
+            self.temp = None  # Reset temp
+            self.message_available = False
 
     def switch_control_mode(self, mode):
         """Switches between PICO and Web control modes."""
@@ -263,32 +289,37 @@ class MQTTHandler:
 
     def get_data(self):
         """Returns the appropriate data based on the control mode."""
-        if self.control_mode == "pico":
-            return (
-                self.endpose,
-                self.trigger,
-                self.joystickX,
-                self.joystickY,
-                self.joystickClick,
-                self.buttonA,
-                self.buttonB,
-                self.grip,
-                self.message_available,
-            )
-        elif self.control_mode == "web":
-            return (
-                self.endpose_delta,
-                self.trigger,
-                self.joystickX,
-                self.joystickY,
-                self.joystickClick,
-                self.buttonA,
-                self.buttonB,
-                self.grip,
-                self.message_available,
-            )
-        else:
-            return None, None, None, None, None, None, None, None, False
+        with self._lock:
+            message_available = self.message_available  # Copy the value under the lock
+            self.message_available = False  # Reset the flag
+            if self.control_mode == "pico":
+                return (
+                    self.endpose,
+                    self.trigger,
+                    self.joystickX,
+                    self.joystickY,
+                    self.joystickClick,
+                    self.buttonA,
+                    self.buttonB,
+                    self.grip,
+                    self.temp,  # Return temp
+                    message_available,
+                )
+            elif self.control_mode == "web":
+                return (
+                    self.endpose_delta,
+                    self.trigger,
+                    self.joystickX,
+                    self.joystickY,
+                    self.joystickClick,
+                    self.buttonA,
+                    self.buttonB,
+                    self.grip,
+                    self.temp,  # Return temp
+                    message_available,
+                )
+            else:
+                return None, None, None, None, None, None, None, None, None, False
 
 
 def cost_function(q, model, data, target_pose):
@@ -322,7 +353,9 @@ def inverse_kinematics(model, data, target_pose, q_init=None):
         q_init = np.zeros(4)  # Initial guess for joint angles, now just 4 joints.
 
     # Optimization bounds (joint limits) - Optional, but highly recommended
-    bounds = [(model.lowerPositionLimit[i], model.upperPositionLimit[i]) for i in [0, 1, 2, 4]]  # Only bounds for active joints
+    bounds = [
+        (model.lowerPositionLimit[i], model.upperPositionLimit[i]) for i in [0, 1, 2, 4]
+    ]  # Only bounds for active joints
 
     start_time = time.time()
 
@@ -399,7 +432,8 @@ def setup_meshcat_visualizer(model, collision_model, visual_model):
 
 def move_to_initial_pose(piper):
     """Moves the robot to a predefined initial pose."""
-    target_joint_angles = [0.0, 0.992, -0.40, 0.0, -0.50, 0.0]
+    # target_joint_angles = [0.0, 0.992, -0.40, 0.0, -0.50, 0.0]
+    target_joint_angles = [0.0, 0.42, -0.35, 0.0, 0.01, 0.0]
     joint_0 = round(target_joint_angles[0] * FACTOR)
     joint_1 = round(target_joint_angles[1] * FACTOR)
     joint_2 = round(target_joint_angles[2] * FACTOR)
@@ -444,7 +478,7 @@ def main():
     last_joint_angles = np.zeros(4)  # Changed to reflect 4 active joints
     trigger_state = 0
 
-    time.sleep(2)
+    time.sleep(0.5)
 
     try:
         while True:
@@ -458,9 +492,20 @@ def main():
                 buttonA,
                 buttonB,
                 grip,
+                temp,
                 message_available,
             ) = mqtt_handler.get_data()
-            #mqtt_handler.switch_control_mode("web")
+
+            # Reset condition
+            if temp == 1:
+                print("Resetting to initial position due to temp = 1")
+                move_to_initial_pose(piper)
+                current_end_pose = INITIAL_END_POSE[:]
+                old_end_pose = INITIAL_END_POSE[:]
+                calibration_pose = None
+                last_joint_angles = np.zeros(4)
+                time.sleep(0.5)  # Give the robot some time to move
+
             # Process button A and B presses
             if buttonA == 1:
                 print("Switch to PICO mode")
@@ -469,22 +514,24 @@ def main():
                 old_end_pose = INITIAL_END_POSE[:]
                 calibration_pose = None
                 last_joint_angles = np.zeros(4)
+                time.sleep(1)
                 mqtt_handler.switch_control_mode("pico")
 
             elif buttonB == 1:
                 print("Switch to WEB mode")
                 move_to_initial_pose(piper)
-                current_end_pose = INITIAL_END_POSE[:]
+                current_end_pose = [0.1, 0, 0.3, 0, pi / 2, 0]
+                # current_end_pose = INITIAL_END_POSE[:]
                 old_end_pose = INITIAL_END_POSE[:]
                 calibration_pose = None
                 last_joint_angles = np.zeros(4)
+                endpose_data = [0, 0, 0, 0, 0, 0]
+                time.sleep(1)
                 mqtt_handler.switch_control_mode("web")
 
             if message_available:  # Only process if a message has arrived
-                mqtt_handler.message_available = False  # Reset the flag
                 if mqtt_handler.control_mode == "pico":
                     endpose = endpose_data
-
 
                     if (
                         endpose is not None and trigger is not None
@@ -586,7 +633,7 @@ def main():
 
                 elif mqtt_handler.control_mode == "web":
                     endpose_delta = endpose_data
-
+                    # print(endpose_delta)
                     # REMOVED BUTTON A AND BUTTON B CONTROL
 
                     if endpose_delta is not None:
@@ -664,7 +711,9 @@ def main():
                             joint_angles_full[5] = 0  # Fixed
                             # viz.display(joint_angles)  # Comment meshcat
                             viz.display(joint_angles_full)
+                            # print(joint_angles_full)
 
+                            # print(piper.GetAllMotorMaxAccLimit())
                             # piper.SearchAllMotorMaxAccLimit()
                             # print(piper.GetAllMotorMaxAccLimit())
                             piper.MotionCtrl_2(0x01, 0x01, 50, 0x00)
@@ -675,7 +724,7 @@ def main():
                             print("IK Failed")  # Print if IK failed
                         old_end_pose = current_end_pose[:]
 
-            time.sleep(0.01)  # Add a small delay to avoid excessive CPU usage
+            time.sleep(0.001)  # Add a small delay to avoid excessive CPU usage
 
     except KeyboardInterrupt:
         print("Exiting...")
