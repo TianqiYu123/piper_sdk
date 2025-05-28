@@ -1,4 +1,4 @@
-     #!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*-coding:utf8-*-
 import numpy as np
 from math import pi
@@ -17,6 +17,12 @@ from os.path import dirname, join, abspath
 import subprocess
 import random  # Import the random module
 import threading  # Import the threading module
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG,  # Set log level
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 from pinocchio.visualize import MeshcatVisualizer
 
@@ -119,14 +125,15 @@ def process_message_pico(payload):
             ) = data["info"]
             rx, ry, rz = euler.quat2euler([qw, qx, qy, qz], "sxyz")
             endpose = left_to_right_hand(x, y, z, rx, ry, rz)
+            logging.debug(f"Processed PICO message: endpose={endpose}, trigger={trigger}, ...")
             return endpose, int(trigger), joystickX, joystickY, joystickClick, buttonA, buttonB, grip, int(
                 temp
             )  # Return temp
         else:
-            print("Invalid data format from PICO")
+            logging.warning("Invalid data format from PICO")
             return None, None, None, None, None, None, None, None, None
     except (json.JSONDecodeError, Exception) as e:
-        print(f"Error processing PICO message: {e}")
+        logging.error(f"Error processing PICO message: {e}", exc_info=True)
         return None, None, None, None, None, None, None, None, None
 
 
@@ -153,14 +160,16 @@ def process_message_web(payload):
                 temp,
             ) = data["info"]
             endpose_delta = [x, y, z, rx, ry, rz]  # DIRECTLY ASSIGN THE FIRST 6 ELEMENTS
+            logging.debug(f"Processed WEB message: endpose_delta={endpose_delta}, trigger={trigger}, ...")
+
             return endpose_delta, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip, int(
                 temp
             )  # Return temp
         else:
-            print("Invalid data format from WEB")
+            logging.warning("Invalid data format from WEB")
             return None, None, None, None, None, None, None, None, None
     except (json.JSONDecodeError, Exception) as e:
-        print(f"Error processing WEB message: {e}")
+        logging.error(f"Error processing WEB message: {e}", exc_info=True)
         return None, None, None, None, None, None, None, None, None
 
 
@@ -171,7 +180,8 @@ class MQTTHandler:
         self.client_id = client_id
         self.client = mqtt.Client(client_id=self.client_id)
         self.client.on_connect = self.on_connect
-        self.client.on_message = self.on_message
+        #self.client.on_message = self.on_message
+        self.client.on_message = self._on_message_callback # Use internal callback
         self.endpose = None
         self.endpose_delta = None
         self.trigger = None
@@ -188,18 +198,23 @@ class MQTTHandler:
         self.message_available = False  # Flag to indicate if a message is available
         self.publish_interval = 0.03  # 30 Hz publish interval
         self.last_publish_time = 0
+        self.qos = 1  # Set QoS level
 
     def on_connect(self, client, userdata, flags, rc):
         if rc == 0:
-            print("Connected to MQTT Broker!")
+            logging.info("Connected to MQTT Broker!")
             self.subscribe_to_topic(self.current_topic)
         else:
-            print(f"Failed to connect, return code {rc}")
+            logging.error(f"Failed to connect, return code {rc}")
 
-    def on_message(self, client, userdata, msg):
-        try:  # Add a try-except block to catch any errors during message processing
-            #payload = msg.payload.decode()
-            #print(f"Received MQTT message on topic {msg.topic}: {payload}")
+    def _on_message_callback(self, client, userdata, msg):
+        """Internal callback to handle messages in a thread-safe manner."""
+        # Spin off a thread to handle the message
+        threading.Thread(target=self._process_message, args=(msg,)).start()
+
+    def _process_message(self, msg):
+        """Processes the MQTT message and updates internal state."""
+        try:
             if self.control_mode == "pico":
                 endpose, trigger, joystickX, joystickY, joystickClick, buttonA, buttonB, grip, temp = (
                     process_message_pico(msg.payload.decode())
@@ -235,10 +250,10 @@ class MQTTHandler:
                     self.message_available = True  # Set the flag when a message is received
 
             else:
-                print("Unknown control mode in on_message.")  # Add a log message for debugging
+                logging.warning("Unknown control mode in on_message.")  # Add a log message for debugging
 
         except Exception as e:
-            print(f"Error processing message in on_message: {e}")  # Add logging for any errors
+            logging.error(f"Error processing message in on_message: {e}", exc_info=True)  # Add logging for any errors
 
     def connect(self):
         try:
@@ -246,7 +261,7 @@ class MQTTHandler:
             self.client.loop_start()  # Use loop_start for non-blocking operation
             # self.client.loop_forever() # Can also use loop_forever if you don't need main thread for other things
         except Exception as e:
-            print(f"Connection error: {e}")
+            logging.error(f"Connection error: {e}")
 
     def disconnect(self):
         self.client.loop_stop()
@@ -256,8 +271,9 @@ class MQTTHandler:
         """Subscribes to the specified MQTT topic and resets stored data."""
         self.client.unsubscribe(self.current_topic)  # Unsubscribe from the old topic
         self.current_topic = topic
-        self.client.subscribe(self.current_topic)
-        print(f"Subscribed to topic: {topic}")
+        self.client.subscribe(self.current_topic, qos=self.qos)  # Use the configured QoS
+        logging.info(f"Subscribed to topic: {topic} with QoS {self.qos}")
+
         # Reset stored data when switching topics
         with self._lock:
             self.endpose = None
@@ -275,7 +291,7 @@ class MQTTHandler:
     def switch_control_mode(self, mode):
         """Switches between PICO and Web control modes."""
         if mode not in ["pico", "web"]:
-            print("Invalid control mode specified.")
+            logging.warning("Invalid control mode specified.")
             return
 
         if mode != self.control_mode:
@@ -285,7 +301,7 @@ class MQTTHandler:
             elif mode == "web":
                 self.subscribe_to_topic(MQTT_TOPIC_WEB)
         else:
-            print(f"Already in {mode} control mode.")
+            logging.info(f"Already in {mode} control mode.")
 
     def get_data(self):
         """Returns the appropriate data based on the control mode."""
@@ -319,6 +335,7 @@ class MQTTHandler:
                     message_available,
                 )
             else:
+                logging.warning("Unknown control mode in get_data.")
                 return None, None, None, None, None, None, None, None, None, False
 
 
@@ -338,7 +355,8 @@ def cost_function(q, model, data, target_pose):
     current_pose = data.oMf[model.getFrameId("gripper_base")].homogeneous  # change tool_frame to your frame name.
 
     # Calculate position error
-    position_error = np.linalg.norm(current_pose[:3, 3] - target_pose[:3, 3])
+    #position_error = np.linalg.norm(current_pose[:3, 3] - target_pose[:3, 3])
+    position_error = np.linalg.norm(current_pose[:2, 3] - target_pose[:2, 3])*0.1 + np.linalg.norm(current_pose[2, 3] - target_pose[2, 3])
 
     # Calculate orientation error (using rotation matrix difference)
     rotation_error = np.linalg.norm(current_pose[:3, :3] - target_pose[:3, :3])
@@ -360,7 +378,7 @@ def inverse_kinematics(model, data, target_pose, q_init=None):
     start_time = time.time()
 
     result = minimize(
-        cost_function, q_init, args=(model, data, target_pose), method="SLSQP", bounds=bounds, tol=1e-4
+        cost_function, q_init, args=(model, data, target_pose), method="SLSQP", bounds=bounds, tol=1e-5
     )  # tol is tolerance
     elapsed_time = time.time() - start_time
     if result.success:
@@ -374,7 +392,7 @@ def run_can_activation_script():
     try:
         subprocess.run(["bash", "can_activate.sh", "can0", "1000000"], check=True)
     except subprocess.CalledProcessError as e:
-        print(f"Error running can_activate.sh: {e}")
+        logging.error(f"Error running can_activate.sh: {e}")
         sys.exit(1)  # Exit if the script fails
 
 
@@ -498,7 +516,7 @@ def main():
 
             # Reset condition
             if temp == 1:
-                print("Resetting to initial position due to temp = 1")
+                logging.info("Resetting to initial position due to temp = 1")
                 move_to_initial_pose(piper)
                 current_end_pose = INITIAL_END_POSE[:]
                 old_end_pose = INITIAL_END_POSE[:]
@@ -508,7 +526,7 @@ def main():
 
             # Process button A and B presses
             if buttonA == 1:
-                print("Switch to PICO mode")
+                logging.info("Switch to PICO mode")
                 move_to_initial_pose(piper)
                 current_end_pose = INITIAL_END_POSE[:]
                 old_end_pose = INITIAL_END_POSE[:]
@@ -518,7 +536,7 @@ def main():
                 mqtt_handler.switch_control_mode("pico")
 
             elif buttonB == 1:
-                print("Switch to WEB mode")
+                logging.info("Switch to WEB mode")
                 move_to_initial_pose(piper)
                 current_end_pose = [0.1, 0, 0.3, 0, pi / 2, 0]
                 # current_end_pose = INITIAL_END_POSE[:]
@@ -541,17 +559,17 @@ def main():
                             trigger = int(trigger)
 
                             if len(endpose) != 6:
-                                print(f"Error: Incorrect endpose length ({len(endpose)}), expected 6.")
+                                logging.warning(f"Error: Incorrect endpose length ({len(endpose)}), expected 6.")
                                 continue
 
                         except (ValueError, TypeError) as e:
-                            print(f"Error unpacking MQTT: {e}")
+                            logging.error(f"Error unpacking MQTT: {e}")
                             continue
 
                         # Handle trigger state
                         if trigger == 0:  # Trigger Released
                             if trigger_state == 1:
-                                print("Trigger released. Returning to initial pose...")
+                                logging.info("Trigger released. Returning to initial pose...")
                                 move_to_initial_pose(piper)
 
                                 current_end_pose = INITIAL_END_POSE[:]
@@ -565,7 +583,7 @@ def main():
                             # Calibrate on first trigger press
                             if calibration_pose is None:
                                 calibration_pose = endpose[:]
-                                print("Trigger pressed. Calibrating to current pose as zero point...")
+                                logging.info("Trigger pressed. Calibrating to current pose as zero point...")
 
                             # Calculate deltas from calibrated pose
                             delta_x = endpose[0] - calibration_pose[0]
@@ -628,9 +646,9 @@ def main():
                                 piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
 
                             else:
-                                print(f"IK Failed")
+                                logging.warning(f"IK Failed")
                             old_end_pose = current_end_pose[:]
-
+                            
                 elif mqtt_handler.control_mode == "web":
                     endpose_delta = endpose_data
                     # print(endpose_delta)
