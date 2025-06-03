@@ -31,7 +31,7 @@ MQTT_BROKER = "47.96.170.89"
 MQTT_PORT = 8003
 MQTT_TOPIC_PICO = "arm/pose/robot_test_arm"  # Topic for PICO messages
 MQTT_TOPIC_WEB = "arm/pose/web_control"  # Topic for Web messages
-MQTT_CLIENT_ID = "endpose_reader"
+# MQTT_CLIENT_ID = "piper_web"  # No longer a constant
 
 # Robot Configuration
 FACTOR = 57290
@@ -174,10 +174,10 @@ def process_message_web(payload):
 
 
 class MQTTHandler:
-    def __init__(self, broker, port, client_id):
+    def __init__(self, broker, port, client_id_prefix="piper_web"):
         self.broker = broker
         self.port = port
-        self.client_id = client_id
+        self.client_id = f"{client_id_prefix}_{random.randint(1000, 9999)}"  # Generate a unique client ID
         self.client = mqtt.Client(client_id=self.client_id)
         self.client.on_connect = self.on_connect
         #self.client.on_message = self.on_message
@@ -202,7 +202,7 @@ class MQTTHandler:
 
     def on_connect(self, client, userdata, flags, rc):
         if rc == 0:
-            logging.info("Connected to MQTT Broker!")
+            logging.info(f"Connected to MQTT Broker with client ID: {self.client_id}!")
             self.subscribe_to_topic(self.current_topic)
         else:
             logging.error(f"Failed to connect, return code {rc}")
@@ -451,7 +451,8 @@ def setup_meshcat_visualizer(model, collision_model, visual_model):
 def move_to_initial_pose(piper):
     """Moves the robot to a predefined initial pose."""
     # target_joint_angles = [0.0, 0.992, -0.40, 0.0, -0.50, 0.0]
-    target_joint_angles = [0.0, 0.42, -0.35, 0.0, 0.01, 0.0]
+    #target_joint_angles = [0.0, 0.42, -0.35, 0.0, 0.01, 0.0]
+    target_joint_angles = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     joint_0 = round(target_joint_angles[0] * FACTOR)
     joint_1 = round(target_joint_angles[1] * FACTOR)
     joint_2 = round(target_joint_angles[2] * FACTOR)
@@ -477,7 +478,7 @@ def main():
 
     run_can_activation_script()
 
-    mqtt_handler = MQTTHandler(MQTT_BROKER, MQTT_PORT, MQTT_CLIENT_ID)
+    mqtt_handler = MQTTHandler(MQTT_BROKER, MQTT_PORT)  # Use random client ID
     mqtt_handler.connect()
 
     piper = C_PiperInterface("can0")
@@ -497,6 +498,10 @@ def main():
     trigger_state = 0
 
     time.sleep(0.5)
+    joint_0 = 0
+    joint_1 = 0
+    joint_2 = 0
+    joint_4 = 0
 
     try:
         while True:
@@ -522,6 +527,10 @@ def main():
                 old_end_pose = INITIAL_END_POSE[:]
                 calibration_pose = None
                 last_joint_angles = np.zeros(4)
+                joint_0 = 0
+                joint_1 = 0
+                joint_2 = 0
+                joint_4 = 0
                 time.sleep(0.5)  # Give the robot some time to move
 
             # Process button A and B presses
@@ -648,7 +657,7 @@ def main():
                             else:
                                 logging.warning(f"IK Failed")
                             old_end_pose = current_end_pose[:]
-                            
+
                 elif mqtt_handler.control_mode == "web":
                     endpose_delta = endpose_data
                     # print(endpose_delta)
@@ -669,78 +678,32 @@ def main():
                         # Accumulate the delta values to the current end pose
                         new_end_pose = [current_end_pose[i] + endpose_delta[i] for i in range(6)]
 
-                        # Add a small random delta to each component of the new end pose
-                        random_delta = [
-                            random.uniform(-MAX_DELTA_POSITION, MAX_DELTA_POSITION),  # x
-                            random.uniform(-MAX_DELTA_POSITION, MAX_DELTA_POSITION),  # y
-                            random.uniform(-MAX_DELTA_POSITION, MAX_DELTA_POSITION),  # z
-                            random.uniform(-MAX_DELTA_ORIENTATION, MAX_DELTA_ORIENTATION),  # rx
-                            random.uniform(-MAX_DELTA_ORIENTATION, MAX_DELTA_ORIENTATION),  # ry
-                            random.uniform(-MAX_DELTA_ORIENTATION, MAX_DELTA_ORIENTATION),  # rz
-                        ]
-                        new_end_pose = [new_end_pose[i] + random_delta[i] for i in range(6)]
-
-                        # Apply limits to the new end pose
-                        new_end_pose[0] = clamp(new_end_pose[0], X_LIMIT)
-                        new_end_pose[1] = clamp(new_end_pose[1], Y_LIMIT)
-                        new_end_pose[2] = clamp(new_end_pose[2], Z_LIMIT)
-                        new_end_pose[3] = clamp(new_end_pose[3], RX_LIMIT)
-                        new_end_pose[4] = clamp(new_end_pose[4], RY_LIMIT)
-                        new_end_pose[5] = clamp(new_end_pose[5], RZ_LIMIT)
-
                         current_end_pose = new_end_pose[:]
 
-                        # IK to find the joint angles, send angles to robot directly
-                        target_pose = np.eye(4)
-                        target_pose[:3, :3] = Rotation.from_euler("xyz", current_end_pose[3:]).as_matrix()
-                        target_pose[:3, 3] = current_end_pose[:3]
+                        # Direct Joint Control based on Z-axis rotation
+                        z_rotation_delta = endpose_delta[5]
+                        z_delta = endpose_delta[2]
 
-                        # Print the target pose (position and orientation)
-                        print("Target Pose:")
-                        print("Position:", target_pose[:3, 3])
-                        print("Orientation (Euler XYZ):", current_end_pose[3:])
+                        joint_0 += z_rotation_delta * FACTOR # Map z-axis rotation to joint0
+                        joint_1 += z_delta * 2 * FACTOR # Scale the increment for joint 1
+                        joint_2 -= z_delta * 4 * FACTOR # Scale the increment for joint 2
+                        joint_4 += z_delta * 2 * FACTOR # Scale the increment for joint 4
+                        print("joint_0:", joint_0)
+                        print("joint_1:", joint_1)
+                        print("joint_2:", joint_2)
+                        print("joint_4:", joint_4)
 
-                        joint_angles, success, elapsed_time = inverse_kinematics(
-                            model, data, target_pose, last_joint_angles
-                        )
 
-                        if success:
-                            print("IK Successful!")  # Print if IK was successful
-                            last_joint_angles = joint_angles
+                        # Convert to int and Send Motor signal
+                        joint_0_send = round(joint_0)  # was joint_angles[0]
+                        joint_1_send = round(joint_1)  # was joint_angles[1]
+                        joint_2_send = round(joint_2)  # was joint_angles[2]
+                        joint_3_send = 0 #  fixed
+                        joint_4_send = round(joint_4)  # was joint_angles[4]
+                        joint_5_send = 0  # Joint Angle fixed = 0
 
-                            # Convert to int and Send Motor signal
-                            joint_0 = round(joint_angles[0] * FACTOR)
-                            joint_1 = round(joint_angles[1] * FACTOR)
-                            joint_2 = round(joint_angles[2] * FACTOR)
-                            joint_3 = round(0 * FACTOR)  # Fixed Joint 3
-                            joint_4 = round(
-                                joint_angles[3] * FACTOR
-                            )  # Joint 4 from result.x (remember, q_init is now 4 elements)
-                            joint_5 = round(0 * FACTOR)  # Fixed Joint 5
-                            joint_6 = round((1 - grip) / 5 * 1000 * 1000)  # Grip control
-
-                            # Visualize the robot in Meshcat
-                            joint_angles_full = np.zeros(model.nq)
-                            joint_angles_full[0] = joint_angles[0]
-                            joint_angles_full[1] = joint_angles[1]
-                            joint_angles_full[2] = joint_angles[2]
-                            joint_angles_full[3] = 0  # Fixed
-                            joint_angles_full[4] = joint_angles[3]
-                            joint_angles_full[5] = 0  # Fixed
-                            # viz.display(joint_angles)  # Comment meshcat
-                            viz.display(joint_angles_full)
-                            # print(joint_angles_full)
-
-                            # print(piper.GetAllMotorMaxAccLimit())
-                            # piper.SearchAllMotorMaxAccLimit()
-                            # print(piper.GetAllMotorMaxAccLimit())
-                            piper.MotionCtrl_2(0x01, 0x01, 50, 0x00)
-                            piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
-                            piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
-
-                        else:
-                            print("IK Failed")  # Print if IK failed
-                        old_end_pose = current_end_pose[:]
+                        piper.MotionCtrl_2(0x01, 0x01, 90, 0x00)
+                        piper.JointCtrl(joint_0_send, joint_1_send, joint_2_send, joint_3_send, joint_4_send, joint_5_send)
 
             time.sleep(0.001)  # Add a small delay to avoid excessive CPU usage
 

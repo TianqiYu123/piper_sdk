@@ -19,7 +19,7 @@ import logging  # Import logging
 MQTT_BROKER = "47.96.170.89"
 MQTT_PORT = 8003
 MQTT_TOPIC = "arm/pose/#"
-MQTT_CLIENT_ID = "endpose_reader"
+MQTT_CLIENT_ID = "endpose_reader001"
 
 # Robot Configuration
 FACTOR = 57290
