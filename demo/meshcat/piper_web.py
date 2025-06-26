@@ -417,6 +417,7 @@ def initialize_robot(piper: C_PiperInterface):
     joint_5 = round((target_joint_angles[5]) * FACTOR)  # Joint Angle is not always = 0
     joint_6 = round(0.2 * 1000 * 1000)
 
+    viz.display(joint_angles)
     piper.MotionCtrl_2(0x01, 0x01, 80, 0x00)
     piper.JointCtrl(joint_0, joint_1, joint_2, joint_3, joint_4, joint_5)
     piper.GripperCtrl(abs(joint_6), 1000, 0x01, 0)
@@ -541,6 +542,10 @@ def main():
                 joint_1 = 0
                 joint_2 = 0
                 joint_4 = 0
+
+                z = 0.0
+                joint_angles_full = np.zeros(6)
+                viz.display(joint_angles_full)
                 time.sleep(0.5)  # Give the robot some time to move
 
             # Process button A and B presses
@@ -695,8 +700,8 @@ def main():
                         #print("z",z)
                         if z > 0.57:
                             z = 0.57
-                        if z < 0.1:
-                            z = 0.1
+                        if z < 0.01:
+                            z = 0.01
                         joint_0 += z_rotation_delta # Map z-axis rotation to joint0
                         joint_1 =  z * 2
                         joint_2 = -z * 4
