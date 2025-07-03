@@ -424,15 +424,16 @@ def initialize_robot(piper: C_PiperInterface):
 
     acc_limit = 500  # Define the acceleration limit
     piper.JointConfig(joint_num=7, set_zero=0, acc_param_is_effective=0xAE, max_joint_acc=acc_limit, clear_err=0xAE)
+    
     time.sleep(0.5)
 
 
 def load_pinocchio_model():
     """Loads the robot model using pinocchio."""
-    pinocchio_model_dir = join(dirname(dirname(str(abspath(__file__)))), "PICO")  # Adjust path as necessary
+    pinocchio_model_dir = join(dirname(dirname(str(abspath(__file__)))), "meshcat")  # Adjust path as necessary
     model_path = pinocchio_model_dir
     mesh_dir = pinocchio_model_dir
-    urdf_filename = "piper_description.urdf"  # Use your robot's URDF
+    urdf_filename = "piper_B2.urdf"  # Use your robot's URDF
     urdf_model_path = join(join(model_path, "piper_description/urdf"), urdf_filename)
     model, collision_model, visual_model = pin.buildModelsFromUrdf(urdf_model_path, mesh_dir)
     data = model.createData()
@@ -495,6 +496,19 @@ def main():
     model, collision_model, visual_model, data = load_pinocchio_model()
     viz = setup_meshcat_visualizer(model, collision_model, visual_model)
 
+    viz.display(np.zeros(model.nq))
+    r = Rotation.from_euler('zx', [-140, 40], degrees=True)  # Rotate Z, then X. Order matters!
+    rotation_matrix = r.as_matrix()
+
+    # Create a translation vector (optional - adjust camera distance/position)
+    translation_vector = np.array([1.5, 1.5, 1])  # move camera 3 units back on the Z axis
+
+    # Combine rotation and translation into a SE3 transform
+    camera_transform = pin.SE3(rotation_matrix, translation_vector)
+
+    # Set the camera transform in Meshcat
+    viz.viewer["/Cameras/default"].set_transform(camera_transform.homogeneous)
+
     # Initial pose and calibration
     current_end_pose = INITIAL_END_POSE[:]
     old_end_pose = INITIAL_END_POSE[:]
@@ -532,7 +546,8 @@ def main():
             # Reset condition
             if temp == 1:
                 #logging.info("Resetting to initial position due to temp = 1")
-                viz.display(np.zeros(8))
+                viz.display(np.zeros(model.nq))
+                #viz.display(np.zeros(8))
                 move_to_initial_pose(piper)
                 current_end_pose = INITIAL_END_POSE[:]
                 old_end_pose = INITIAL_END_POSE[:]
@@ -652,12 +667,12 @@ def main():
 
                                 # Visualize the robot in Meshcat
                                 joint_angles_full = np.zeros(model.nq)
-                                joint_angles_full[0] = joint_angles[0]
-                                joint_angles_full[1] = joint_angles[1]
-                                joint_angles_full[2] = joint_angles[2]
-                                joint_angles_full[3] = 0  # Fixed
-                                joint_angles_full[4] = joint_angles[3]
-                                joint_angles_full[5] = 0  # Fixed
+                                joint_angles_full[12] = joint_angles[0]
+                                joint_angles_full[13] = joint_angles[1]
+                                joint_angles_full[14] = joint_angles[2]
+                                joint_angles_full[15] = 0  # Fixed
+                                joint_angles_full[16] = joint_angles[3]
+                                joint_angles_full[17] = 0  # Fixed
 
                                 viz.display(joint_angles_full)
 
@@ -715,17 +730,19 @@ def main():
 
                         # Visualize the robot in Meshcat
                         joint_angles_full = np.zeros(model.nq)
-                        joint_angles_full[0] = joint_0
-                        joint_angles_full[1] = joint_1
-                        joint_angles_full[2] = joint_2
-                        joint_angles_full[3] = 0  # Fixed
-                        joint_angles_full[4] = joint_4
-                        joint_angles_full[5] = 0  # Fixed
+                        joint_angles_full[12] = joint_0
+                        joint_angles_full[13] = joint_1
+                        joint_angles_full[14] = joint_2
+                        joint_angles_full[15] = 0  # Fixed
+                        joint_angles_full[16] = joint_4
+                        joint_angles_full[17] = 0  # Fixed
 
                         viz.display(joint_angles_full)
 
                         piper.MotionCtrl_2(0x01, 0x01, 90, 0x00)
                         piper.JointCtrl(joint_0_send, joint_1_send, joint_2_send, joint_3_send, joint_4_send, joint_5_send)
+
+
 
             time.sleep(0.001)  
 
